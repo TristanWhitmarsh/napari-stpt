@@ -1,0 +1,8 @@
+dask
+napari
+numpy
+xarray
+pyside2
+qtpy
+SimpleITK
+zarr
