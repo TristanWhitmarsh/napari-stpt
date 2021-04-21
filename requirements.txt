@@ -3,3 +3,5 @@ numpy
 xarray
 qtpy
 SimpleITK
+opencv-python
+zarr
