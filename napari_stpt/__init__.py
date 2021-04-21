@@ -1,0 +1,1 @@
+from napari_stpt.napari_stpt import NapariSTPT

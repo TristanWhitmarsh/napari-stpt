@@ -1,8 +1,16 @@
 """
 napari-STPT reads zarr files and displays them
 """
-import sys
-import napari_stpt
+# import sys
+
+try:
+    from napari_stpt.napari_stpt import NapariSTPT
+except:
+    from napari_stpt import NapariSTPT
+
+def main():
+    napari = NapariSTPT()
+    napari.main()
 
 if __name__ == "__main__":
-    napari_stpt.NapariSTPT().main(sys.argv[1:])
+    main()

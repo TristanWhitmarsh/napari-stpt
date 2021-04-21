@@ -7,12 +7,9 @@ import sys
 import napari
 import numpy as np
 import xarray as xr
-import glob
-from qtpy import QtCore, QtGui, QtWidgets
+from qtpy import QtCore, QtWidgets
 import SimpleITK as sitk
-import getopt
 from scipy import ndimage
-import math
 import cv2
 
 
@@ -37,6 +34,7 @@ class NapariSTPT:
         self.aligned_4 = None
 
         self.spinN = None
+        self.maxSizeN = None
         self.thresholdN = None
         self.slice_names = None
 
@@ -76,14 +74,14 @@ class NapariSTPT:
             ds1 = xr.open_zarr(self.search_folder.text(
             ) + str(self.comboBoxPath.currentText())+'/mos.zarr', consolidated=True)
             print("consolidated")
-        except:
+        except Exception:
             print("none-consolidated")
             ds1 = xr.open_zarr(self.search_folder.text() +
                                str(self.comboBoxPath.currentText())+'/mos.zarr')
-        #ds2 = xr.open_zarr(str(self.comboBoxPath.currentText())+'/mos.zarr', group='l.2')
-        #ds4 = xr.open_zarr(str(self.comboBoxPath.currentText())+'/mos.zarr', group='l.4')
-        #ds8 = xr.open_zarr(str(self.comboBoxPath.currentText())+'/mos.zarr', group='l.8')
-        #ds32 = xr.open_zarr(str(self.comboBoxPath.currentText())+'/mos.zarr', group='l.32')
+        # ds2 = xr.open_zarr(str(self.comboBoxPath.currentText())+'/mos.zarr', group='l.2')
+        # ds4 = xr.open_zarr(str(self.comboBoxPath.currentText())+'/mos.zarr', group='l.4')
+        # ds8 = xr.open_zarr(str(self.comboBoxPath.currentText())+'/mos.zarr', group='l.8')
+        # ds32 = xr.open_zarr(str(self.comboBoxPath.currentText())+'/mos.zarr', group='l.32')
 
         self.slice_names = ds1.attrs['cube_reg']['slice']
 
@@ -99,7 +97,7 @@ class NapariSTPT:
         align_x = ds1.attrs['cube_reg']['abs_dx']
         align_y = ds1.attrs['cube_reg']['abs_dy']
 
-        #print("size: {}".format(ds1.dims))
+        # print("size: {}".format(ds1.dims))
 
         resolution = int(self.comboBoxResolution.currentText())
         print("loading at resolution {}".format(resolution))
@@ -116,8 +114,8 @@ class NapariSTPT:
                 print("loading C1")
                 volume_1 = (ds.sel(channel=1, type='mosaic',
                             z=0).to_array().data * bscale + bzero)
-                print("cropping C1")
-                volume_1 = self.CropOriginal(volume_1)
+                # print("cropping C1")
+                # volume_1 = self.CropOriginal(volume_1)
                 print("aligning C1")
                 self.aligned_1 = self.Align(
                     volume_1, resolution, output_resolution)
@@ -128,8 +126,8 @@ class NapariSTPT:
                 print("loading C2")
                 volume_2 = (ds.sel(channel=2, type='mosaic',
                             z=0).to_array().data * bscale + bzero)
-                print("cropping C2")
-                volume_2 = self.CropOriginal(volume_2)
+                # print("cropping C2")
+                # volume_2 = self.CropOriginal(volume_2)
                 print("aligning C2")
                 self.aligned_2 = self.Align(
                     volume_2, resolution, output_resolution)
@@ -140,8 +138,8 @@ class NapariSTPT:
                 print("loading C3")
                 volume_3 = (ds.sel(channel=3, type='mosaic',
                             z=0).to_array().data * bscale + bzero)
-                print("cropping C3")
-                volume_3 = self.CropOriginal(volume_3)
+                # print("cropping C3")
+                # volume_3 = self.CropOriginal(volume_3)
                 print("aligning C3")
                 self.aligned_3 = self.Align(
                     volume_3, resolution, output_resolution)
@@ -152,14 +150,13 @@ class NapariSTPT:
                 print("loading C4")
                 volume_4 = (ds.sel(channel=4, type='mosaic',
                             z=0).to_array().data * bscale + bzero)
-                print("cropping C4")
-                volume_4 = self.CropOriginal(volume_4)
+                # print("cropping C4")
+                # volume_4 = self.CropOriginal(volume_4)
                 print("aligning C4")
                 self.aligned_4 = self.Align(
                     volume_4, resolution, output_resolution)
                 self.viewer.add_image([self.aligned_4], name='C4', scale=(
                     15, output_resolution, output_resolution), blending='additive', colormap='bop blue')
-
 
     def Load2D(self, text):
 
@@ -193,8 +190,8 @@ class NapariSTPT:
 
         slice_name = self.slice_names[z]
 
-        #z = 0
-        #slice_name = 'S00'+str(z+1)
+        # z = 0
+        # slice_name = 'S00'+str(z+1)
         # if(z+1 > 9):
         #    slice_name = 'S0'+str(z+1)
         # if(z+1 > 99):
@@ -253,7 +250,7 @@ class NapariSTPT:
             with napari.gui_qt():
                 self.viewer.add_image([im1, im2, im4, im8, im16, im32], multiscale=True,
                                       name='C3', blending='additive', colormap='green')
-                #self.viewer.add_image(float_img, multiscale=False, name='C3', blending='additive', colormap='green')
+                # self.viewer.add_image(float_img, multiscale=False, name='C3', blending='additive', colormap='green')
 
         if self.cb_C4.isChecked():
             im1 = ds1[slice_name].sel(
@@ -276,7 +273,7 @@ class NapariSTPT:
     def Align(self, volume, resolution, output_resolution):
 
         spacing = (ds1['S001'].attrs['scale'])
-        #size_multiplier = (resolution*0.1*spacing[0])/7.5
+        # size_multiplier = (resolution*0.1*spacing[0])/7.5
         # print(resolution*0.1*spacing[0])
         size_multiplier = (resolution*0.1*spacing[0])/output_resolution
         size = (volume.shape[0], int(
@@ -294,7 +291,7 @@ class NapariSTPT:
             fixed = sitk.GetImageFromArray(volume[z, :, :])
             fixed.SetOrigin((0, 0))
 
-            #slice_name = 'S00'+str(z+1)
+            # slice_name = 'S00'+str(z+1)
             # if(z+1 > 9):
             #    slice_name = 'S0'+str(z+1)
             # if(z+1 > 99):
@@ -342,9 +339,9 @@ class NapariSTPT:
 
         return aligned
 
-    def Keep_n_Regions(self):
+    def Remove_Regions(self, use_size):
 
-        output_resolution = float(self.pixel_size.text())
+        # output_resolution = float(self.pixel_size.text())
         threshold = float(self.thresholdN.text())
 
         if self.aligned_1 is not None and self.cb_C1.isChecked() and any(i.name == 'C1' for i in self.viewer.layers):
@@ -366,7 +363,10 @@ class NapariSTPT:
                 sizes = stats[:, -1]
                 sizes_sorted = np.sort(sizes, axis=0)
 
-                max_size = sizes_sorted[len(sizes_sorted)-1-keep_n]
+                if use_size:
+                    max_size = float(self.maxSizeN.text())
+                else:
+                    max_size = sizes_sorted[len(sizes_sorted)-1-keep_n]
                 for i in range(1, nb_components):
                     if sizes[i] < max_size:
                         volume_z[output == i] = threshold
@@ -382,7 +382,7 @@ class NapariSTPT:
             threholded = ndimage.binary_fill_holes(threholded)
             threholded = threholded.astype(np.uint8)
 
-            #regions = threholded.copy()
+            # regions = threholded.copy()
 
             # with napari.gui_qt():
             #    self.viewer.add_image(threholded, name='C2 threholded', scale=(15,output_resolution,output_resolution), blending='additive', colormap='green')
@@ -400,9 +400,12 @@ class NapariSTPT:
                 sizes = stats[:, -1]
                 sizes_sorted = np.sort(sizes, axis=0)
 
-                #regions[z,:,:] = output
+                # regions[z,:,:] = output
 
-                max_size = sizes_sorted[len(sizes_sorted)-1-keep_n]
+                if use_size:
+                    max_size = float(self.maxSizeN.text())
+                else:
+                    max_size = sizes_sorted[len(sizes_sorted)-1-keep_n]
                 for i in range(1, nb_components):
                     if sizes[i] < max_size:
                         volume_z[output == i] = threshold
@@ -434,7 +437,10 @@ class NapariSTPT:
                 sizes = stats[:, -1]
                 sizes_sorted = np.sort(sizes, axis=0)
 
-                max_size = sizes_sorted[len(sizes_sorted)-1-keep_n]
+                if use_size:
+                    max_size = float(self.maxSizeN.text())
+                else:
+                    max_size = sizes_sorted[len(sizes_sorted)-1-keep_n]
                 for i in range(1, nb_components):
                     if sizes[i] < max_size:
                         volume_z[output == i] = threshold
@@ -463,7 +469,10 @@ class NapariSTPT:
                 sizes = stats[:, -1]
                 sizes_sorted = np.sort(sizes, axis=0)
 
-                max_size = sizes_sorted[len(sizes_sorted)-1-keep_n]
+                if use_size:
+                    max_size = float(self.maxSizeN.text())
+                else:
+                    max_size = sizes_sorted[len(sizes_sorted)-1-keep_n]
                 for i in range(1, nb_components):
                     if sizes[i] < max_size:
                         volume_z[output == i] = threshold
@@ -473,10 +482,16 @@ class NapariSTPT:
             self.viewer.layers['C4'].visible = False
             self.viewer.layers['C4'].visible = True
 
-        #self.viewer.layers['C2'].contrast_limits=(0, 3)
+        # self.viewer.layers['C2'].contrast_limits=(0, 3)
         # with napari.gui_qt():
         #    if self.cb_C2.isChecked():
         #        self.viewer.add_image([self.aligned_2], name='C2 processed', scale=(15,output_resolution,output_resolution), blending='additive', colormap='red')
+
+    def Remove_Small_Regions(self):
+        self.Remove_Regions(True)
+
+    def Keep_n_Regions(self):
+        self.Remove_Regions(False)
 
     def Crop(self):
 
@@ -571,7 +586,7 @@ class NapariSTPT:
             self.aligned_1 = self.aligned_1[minX_final:maxX_final,
                                             minY_final:maxY_final, minZ_final:maxZ_final]
             self.viewer.layers.remove('C1')
-            self.viewer.add_image([self.aligned_2], name='C1', scale=(
+            self.viewer.add_image([self.aligned_1], name='C1', scale=(
                 15, output_resolution, output_resolution), blending='additive', colormap='bop purple')
         if self.aligned_2 is not None and self.cb_C2.isChecked() and any(i.name == 'C2' for i in self.viewer.layers):
             self.aligned_2 = self.aligned_2[minX_final:maxX_final,
@@ -583,19 +598,19 @@ class NapariSTPT:
             self.aligned_3 = self.aligned_3[minX_final:maxX_final,
                                             minY_final:maxY_final, minZ_final:maxZ_final]
             self.viewer.layers.remove('C3')
-            self.viewer.add_image([self.aligned_2], name='C3', scale=(
+            self.viewer.add_image([self.aligned_3], name='C3', scale=(
                 15, output_resolution, output_resolution), blending='additive', colormap='green')
         if self.aligned_4 is not None and self.cb_C4.isChecked() and any(i.name == 'C4' for i in self.viewer.layers):
             self.aligned_4 = self.aligned_4[minX_final:maxX_final,
                                             minY_final:maxY_final, minZ_final:maxZ_final]
             self.viewer.layers.remove('C4')
-            self.viewer.add_image([self.aligned_2], name='C4', scale=(
+            self.viewer.add_image([self.aligned_4], name='C4', scale=(
                 15, output_resolution, output_resolution), blending='additive', colormap='bop blue')
 
     def SelectFolder(self):
         file = str(QtWidgets.QFileDialog.getExistingDirectory())
         file = file + '/'
-        #text_files = glob.glob(path + "/**/**/*.zarr", recursive = False)
+        # text_files = glob.glob(path + "/**/**/*.zarr", recursive = False)
         # print(text_files)
         # return
 
@@ -630,8 +645,8 @@ class NapariSTPT:
                 self.image_slice.setText("0")
                 self.slice_names = ds.attrs['cube_reg']['slice']
                 self.scroll.setRange(0, len(self.slice_names))
-            except:
-                #print("not initialised")
+            except Exception:
+                # print("not initialised")
                 pass
         else:
             print("adding default resolution")
@@ -648,12 +663,8 @@ class NapariSTPT:
         value = self.scroll.value()
         self.image_slice.setText(str(value))
 
-    def main(self, argv):
+    def main(self):
         with napari.gui_qt():
-
-            loaded16_2 = 0
-            loaded16_3 = 0
-            loaded16_4 = 0
 
             self.viewer = napari.Viewer()
 
@@ -731,6 +742,13 @@ class NapariSTPT:
             vbox.addLayout(hbox)
 
             hbox = QtWidgets.QHBoxLayout()
+            hbox.addWidget(QtWidgets.QLabel("Tissue threshold value:"))
+            self.thresholdN = QtWidgets.QLineEdit("0.3")
+            hbox.addWidget(self.thresholdN)
+            hbox.addStretch(1)
+            vbox.addLayout(hbox)
+
+            hbox = QtWidgets.QHBoxLayout()
             hbox.addWidget(QtWidgets.QLabel("Number of regions to retain:"))
             self.spinN = QtWidgets.QSpinBox()
             self.spinN.setValue(1)
@@ -739,9 +757,9 @@ class NapariSTPT:
             vbox.addLayout(hbox)
 
             hbox = QtWidgets.QHBoxLayout()
-            hbox.addWidget(QtWidgets.QLabel("Tissue threshold value:"))
-            self.thresholdN = QtWidgets.QLineEdit("0.1")
-            hbox.addWidget(self.thresholdN)
+            hbox.addWidget(QtWidgets.QLabel("Minimal size:"))
+            self.maxSizeN = QtWidgets.QLineEdit("5000")
+            hbox.addWidget(self.maxSizeN)
             hbox.addStretch(1)
             vbox.addLayout(hbox)
 
@@ -750,6 +768,10 @@ class NapariSTPT:
             bKeepN.setCheckable(True)
             bKeepN.clicked.connect(self.Keep_n_Regions)
             hbox.addWidget(bKeepN)
+            bRemoveN = QtWidgets.QPushButton('Remove small regions')
+            bRemoveN.setCheckable(True)
+            bRemoveN.clicked.connect(self.Remove_Small_Regions)
+            hbox.addWidget(bRemoveN)
             bCrop = QtWidgets.QPushButton('Crop')
             bCrop.setCheckable(True)
             bCrop.clicked.connect(self.Crop)
@@ -782,24 +804,20 @@ class NapariSTPT:
             widget.setLayout(vbox)
             self.viewer.window.add_dock_widget(widget, area="right")
 
-            inputfile = ''
-            try:
-                opts, args = getopt.getopt(
-                    argv, "hi:c:", ["ifile=", "channel="])
-            except getopt.GetoptError:
-                # print 'napari-stpt -i <inputfile> -c <channel>'
-                sys.exit(2)
-            for opt, arg in opts:
-                if opt == '-h':
-                    # print 'napari-stpt'
-                    sys.exit()
-                elif opt in ("-i", "--ifile"):
-                    inputfile = arg
-                elif opt in ("-c", "--channel"):
-                    channel = channel
-            # print 'Input file is "', inputfile
-            # print 'channel is "', channel
+            # inputfile = ''
+            # try:
+            #     opts, args = getopt.getopt(
+            #         argv, "hi:c:", ["ifile=", "channel="])
+            # except getopt.GetoptError:'
+            #     sys.exit(2)
+            # for opt, arg in opts:
+            #     if opt == '-h':
+            #         sys.exit()
+            #     elif opt in ("-i", "--ifile"):
+            #         inputfile = arg
+            #     elif opt in ("-c", "--channel"):
+            #         channel = channel
 
 
-#if __name__ == "__main__":
+# if __name__ == "__main__":
 #    NapariSTPT().main(sys.argv[1:])
