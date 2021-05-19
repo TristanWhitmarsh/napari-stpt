@@ -16,7 +16,7 @@ REQUIREMENTS = [i.strip() for i in open("requirements.txt").readlines()]
 # This call to setup() does all the work
 setup(
     name="napari-stpt",
-    version="0.0.8.11",
+    version="0.0.8.12",
     description="napari viewer which can read stpt images as zarr files",
     long_description=README,
     long_description_content_type="text/markdown",
