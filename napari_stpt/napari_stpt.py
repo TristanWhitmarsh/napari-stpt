@@ -337,23 +337,23 @@ class NapariSTPT:
 
     def LoadInRegion(self, text):
 
-        print(self.viewer.layers.selected[0].data)
-        data_length = len(self.viewer.layers.selected[0].data[0])
+        print(self.viewer.layers['Shapes'].data)
+        data_length = len(self.viewer.layers['Shapes'].data[0])
         print(data_length)
         minX = 100000000
         maxX = 0
         minY = 100000000
         maxY = 0
         for i in range(0, data_length):
-            print(self.viewer.layers.selected[0].data[0][i])
-            if minX > self.viewer.layers.selected[0].data[0][i][1]:
-                minX = self.viewer.layers.selected[0].data[0][i][1]
-            if maxX < self.viewer.layers.selected[0].data[0][i][1]:
-                maxX = self.viewer.layers.selected[0].data[0][i][1]
-            if minY > self.viewer.layers.selected[0].data[0][i][2]:
-                minY = self.viewer.layers.selected[0].data[0][i][2]
-            if maxY < self.viewer.layers.selected[0].data[0][i][2]:
-                maxY = self.viewer.layers.selected[0].data[0][i][2]
+            print(self.viewer.layers['Shapes'].data[0][i])
+            if minX > self.viewer.layers['Shapes'].data[0][i][1]:
+                minX = self.viewer.layers['Shapes'].data[0][i][1]
+            if maxX < self.viewer.layers['Shapes'].data[0][i][1]:
+                maxX = self.viewer.layers['Shapes'].data[0][i][1]
+            if minY > self.viewer.layers['Shapes'].data[0][i][2]:
+                minY = self.viewer.layers['Shapes'].data[0][i][2]
+            if maxY < self.viewer.layers['Shapes'].data[0][i][2]:
+                maxY = self.viewer.layers['Shapes'].data[0][i][2]
 
         if self.aligned_1 is not None:
             self.crop_start_ratio_x = self.aligned_1.shape[1]/minX
@@ -835,24 +835,25 @@ class NapariSTPT:
     def CropToRegion(self):
 
         output_resolution = float(self.pixel_size.text())
-
-        print(self.viewer.layers.selected[0].data)
-        data_length = len(self.viewer.layers.selected[0].data[0])
+        #print(self.viewer.layers['Shapes'])
+        #print(self.viewer.layers['Shapes'].data)
+        #print(self.viewer.layers.selection[0])
+        data_length = len(self.viewer.layers['Shapes'].data[0])
         print(data_length)
         minX = 100000000
         maxX = 0
         minY = 100000000
         maxY = 0
         for i in range(0, data_length):
-            print(self.viewer.layers.selected[0].data[0][i])
-            if minX > self.viewer.layers.selected[0].data[0][i][1]:
-                minX = self.viewer.layers.selected[0].data[0][i][1]
-            if maxX < self.viewer.layers.selected[0].data[0][i][1]:
-                maxX = self.viewer.layers.selected[0].data[0][i][1]
-            if minY > self.viewer.layers.selected[0].data[0][i][2]:
-                minY = self.viewer.layers.selected[0].data[0][i][2]
-            if maxY < self.viewer.layers.selected[0].data[0][i][2]:
-                maxY = self.viewer.layers.selected[0].data[0][i][2]
+            print(self.viewer.layers['Shapes'].data[0][i])
+            if minX > self.viewer.layers['Shapes'].data[0][i][1]:
+                minX = self.viewer.layers['Shapes'].data[0][i][1]
+            if maxX < self.viewer.layers['Shapes'].data[0][i][1]:
+                maxX = self.viewer.layers['Shapes'].data[0][i][1]
+            if minY > self.viewer.layers['Shapes'].data[0][i][2]:
+                minY = self.viewer.layers['Shapes'].data[0][i][2]
+            if maxY < self.viewer.layers['Shapes'].data[0][i][2]:
+                maxY = self.viewer.layers['Shapes'].data[0][i][2]
 
         print("crop to: {} {} {} {}".format(minX, maxX, minY, maxY))
 
@@ -940,25 +941,25 @@ class NapariSTPT:
     def run_stardist(self):
         print("run_stardist")
 
-        print(self.viewer.layers.selected[0].data)
+        print(self.viewer.layers['Shapes'].data)
         # print()
 
-        data_length = len(self.viewer.layers.selected[0].data[0])
+        data_length = len(self.viewer.layers['Shapes'].data[0])
         print(data_length)
         minX = 100000000
         maxX = 0
         minY = 100000000
         maxY = 0
         for i in range(0, data_length):
-            print(self.viewer.layers.selected[0].data[0][i])
-            if minX > self.viewer.layers.selected[0].data[0][i][0]:
-                minX = self.viewer.layers.selected[0].data[0][i][0]
-            if maxX < self.viewer.layers.selected[0].data[0][i][0]:
-                maxX = self.viewer.layers.selected[0].data[0][i][0]
-            if minY > self.viewer.layers.selected[0].data[0][i][1]:
-                minY = self.viewer.layers.selected[0].data[0][i][1]
-            if maxY < self.viewer.layers.selected[0].data[0][i][1]:
-                maxY = self.viewer.layers.selected[0].data[0][i][1]
+            print(self.viewer.layers['Shapes'].data[0][i])
+            if minX > self.viewer.layers['Shapes'].data[0][i][0]:
+                minX = self.viewer.layers['Shapes'].data[0][i][0]
+            if maxX < self.viewer.layers['Shapes'].data[0][i][0]:
+                maxX = self.viewer.layers['Shapes'].data[0][i][0]
+            if minY > self.viewer.layers['Shapes'].data[0][i][1]:
+                minY = self.viewer.layers['Shapes'].data[0][i][1]
+            if maxY < self.viewer.layers['Shapes'].data[0][i][1]:
+                maxY = self.viewer.layers['Shapes'].data[0][i][1]
 
         print("{} {} {} {}".format(minX, maxX, minY, maxY))
         # return
@@ -1247,8 +1248,6 @@ class NapariSTPT:
             hbox.addStretch(1)
             vbox.addLayout(hbox)
 
-            widget.setLayout(vbox)
-            self.viewer.window.add_dock_widget(widget, area="right")
 
             bSaveVolume = QtWidgets.QPushButton('Save volume')
             bSaveVolume.setCheckable(True)
@@ -1272,6 +1271,10 @@ class NapariSTPT:
             vbox.addLayout(hbox)
 
             vbox.addStretch(1)
+
+            
+            widget.setLayout(vbox)
+            self.viewer.window.add_dock_widget(widget, area="right")
 
             # inputfile = ''
             # try:
