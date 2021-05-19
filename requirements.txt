@@ -9,4 +9,3 @@ zarr
 stardist
 tensorflow
 napari-animation
-git+https://github.com/guiwitz/naparimovie.git@master#egg=naparimovie

@@ -8,9 +8,11 @@ You can install the Napari STPT viewer from [PyPI](https://pypi.org/project/napa
     pip install napari-stpt
 
 The viewer is supported on Python 3.7 and above.
-type the following to install napari movie:
+
+Type the following to install napari movie:
 
     pip install git+https://github.com/guiwitz/naparimovie.git@master#egg=naparimovie
+
 
 ## How to run
 
