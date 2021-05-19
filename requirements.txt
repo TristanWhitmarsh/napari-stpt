@@ -2,6 +2,11 @@ napari
 numpy
 xarray
 qtpy
+pyqt5
 SimpleITK
 opencv-python
 zarr
+stardist
+tensorflow
+napari-animation
+git+https://github.com/guiwitz/naparimovie.git@master#egg=naparimovie
