@@ -12,14 +12,16 @@ import SimpleITK as sitk
 from scipy import ndimage
 import cv2
 from stardist.models import StarDist2D
+from napari_animation import AnimationWidget
+from PIL import Image, ImageDraw
 
 # import skimage.io
 # from stardist.models import StarDist3D
 from csbdeep.utils import normalize
-from naparimovie import Movie
+#from naparimovie import Movie
 import math
 import gc
-
+import json
 
 class NapariSTPT:
 
@@ -52,7 +54,7 @@ class NapariSTPT:
         self.im1 = None
         self.im32 = None
 
-        self.movie = None
+        #self.movie = None
         self.optical_slices = None
         self.nr_optical_slices = None
         self.shape = None
@@ -63,7 +65,8 @@ class NapariSTPT:
         self.crop_size_ratio_y = None
 
         self.crop = False
-
+        self.old_method = True
+        
     def CropOriginal(self, volume):
 
         threshold = float(self.thresholdN.text())
@@ -123,46 +126,104 @@ class NapariSTPT:
             print("none-consolidated")
             self.ds1 = xr.open_zarr(self.search_folder.text() +
                                     str(self.comboBoxPath.currentText())+'/mos.zarr')
+
         # ds2 = xr.open_zarr(str(self.comboBoxPath.currentText())+'/mos.zarr', group='l.2')
         # ds4 = xr.open_zarr(str(self.comboBoxPath.currentText())+'/mos.zarr', group='l.4')
         # ds8 = xr.open_zarr(str(self.comboBoxPath.currentText())+'/mos.zarr', group='l.8')
         # ds32 = xr.open_zarr(str(self.comboBoxPath.currentText())+'/mos.zarr', group='l.32')
+        
+        # print("self.ds1.attrs")
+        # print(self.ds1.attrs)
+        # print("self.ds1.keys()")
+        # print(self.ds1.keys()["Coordinates"])
+        # print("self.ds1.attrs.keys()")
+        # print(self.ds1.attrs.keys())
+        # print("self.ds1['S002'].attrs")
+        # print(self.ds1['S002'].attrs)
+        # print(self.ds1[f"S{slice_no:03d}"].attrs)
 
-        self.slice_names = self.ds1.attrs['cube_reg']['slice']
+
+        #print(self.ds1['S002'].attrs['offsets']['x'])
+        # print(self.ds1['S002'].attrs['bscale'])
+        # print(json.loads(self.ds1['S002'].attrs['scale'])["x"])
+        # print(json.loads(self.ds1['S002'].attrs['scale'])["y"])
+        # print(json.loads(self.ds1['S002'].attrs['scale'])["z"])
+
+        #print(type(self.ds1['S002'].attrs['scale']))
+        #print(self.ds1['S002'].attrs['scale']["y"])
+        #print(self.ds1['S002'].attrs['scale']['z'])
+        #print(self.ds1['S001'].attrs['raw_meta'][0][0]['zres'])
+        #print(self.ds1['S001'].attrs.keys())
+        #print(self.ds1.attrs["multiscale"]['datasets'][1]['level'])
+        #print(self.ds1.attrs["multiscale"]['datasets'][1]['path'])
         # print(self.slice_names)
 
-        bscale = self.ds1.attrs['bscale']
-        bzero = self.ds1.attrs['bzero']
+        #old_method = True
 
-        # print(self.ds1.attrs.keys())
-        # print(self.ds1.attrs)
-        # print(self.ds1['S001'].attrs.keys())
-        # print(self.ds1['S001'].attrs)
-        # print(self.ds1.attrs["multiscale"]['datasets'][1]['level'])
-        # print(self.ds1.attrs["multiscale"]['datasets'][1]['path'])
-
-        self.align_x = self.ds1.attrs['cube_reg']['abs_dx']
-        self.align_y = self.ds1.attrs['cube_reg']['abs_dy']
-        print(f"self.align_x length {len(self.align_x)}")
+        if self.old_method:
+            #Old method
+            bscale = self.ds1.attrs['bscale']
+            bzero = self.ds1.attrs['bzero']
+            self.slice_names = self.ds1.attrs['cube_reg']['slice']
+            self.align_x = self.ds1.attrs['cube_reg']['abs_dx']
+            self.align_y = self.ds1.attrs['cube_reg']['abs_dy']
+            print(f"self.align_x length {len(self.align_x)}")
+            print(f"self.align_x {self.align_x}")
+            print(f"self.align_y {self.align_y}")
+        else:
+            
+            bscale = self.ds1['S001'].attrs['bscale']
+            bzero = self.ds1['S001'].attrs['bzero']
 
         # print("size: {}".format(self.ds1.dims))
 
-        resolution = int(self.comboBoxResolution.currentText())
-        print("loading at resolution {}".format(resolution))
-        index = self.comboBoxResolution.currentIndex()
-        print("group: " +
-              self.ds1.attrs["multiscale"]['datasets'][index]['path'])
-        gr = self.ds1.attrs["multiscale"]['datasets'][index]['path']
-        ds = xr.open_zarr(self.search_folder.text(
-        ) + str(self.comboBoxPath.currentText())+'/mos.zarr', group=gr)
+        output_resolution = float(self.pixel_size.text())
+        #resolution = int(self.comboBoxResolution.currentText())
+        resolution = 32
+        index = 5
+        if (output_resolution / 0.5) < 32:
+            resolution = 16
+            index = 4
+        if (output_resolution / 0.5) < 16:
+            resolution = 8
+            index = 3
+        if (output_resolution / 0.5) < 8:
+            resolution = 4
+            index = 2
+        if (output_resolution / 0.5) < 4:
+            resolution = 2
+            index = 1
+        if (output_resolution / 0.5) < 2:
+            resolution = 1
+            index = 0
+        
+        if self.old_method:
+            print("loading at resolution {}".format(resolution))
+            #index = self.comboBoxResolution.currentIndex()
+            print("group: " + self.ds1.attrs["multiscale"]['datasets'][index]['path'])
+            gr = self.ds1.attrs["multiscale"]['datasets'][index]['path']
+            ds = xr.open_zarr(self.search_folder.text() + str(self.comboBoxPath.currentText())+'/mos.zarr', group=gr)
+        else:
+            print("resolution")
+            print(resolution)
+            print(json.loads(self.ds1.attrs["multiscale"])['datasets'][index]['path'])
+            gr = json.loads(self.ds1.attrs["multiscale"])['datasets'][index]['path']
+            print(gr)
+            ds = xr.open_zarr(self.search_folder.text() + str(self.comboBoxPath.currentText())+'/mos.zarr', group=gr)
 
         self.optical_slices = len(ds.z)
-        if self.optical_slices > int(self.nr_optical_slices.text()):
-            self.optical_slices = int(self.nr_optical_slices.text())
+        print(f"optical_slices available: {self.optical_slices}")
+        
+        if self.optical_slices > 1:
+            optical_section_spacing = self.ds1['S001'].attrs['raw_meta'][0][0]['zres']
+            print(f"optical_slices zres: {optical_section_spacing}")
+            expected_nr_of_slices = round(15.0 / optical_section_spacing)
+            if self.optical_slices > expected_nr_of_slices:
+                self.optical_slices = expected_nr_of_slices
 
-        print(f"optical_slices: {self.optical_slices}")
+        print(f"optical_slices used: {self.optical_slices}")
 
-        output_resolution = float(self.pixel_size.text())
+        
 
         with napari.gui_qt():
             if self.cb_C1.isChecked():
@@ -200,8 +261,8 @@ class NapariSTPT:
                 # self.aligned_1 = volume_1
 
                 print("aligning C1")
-                self.aligned_1 = self.Align(
-                    volume_1, resolution, output_resolution)
+                self.aligned_1 = self.Align(volume_1, resolution, output_resolution)
+                
                 self.shape = self.aligned_1.shape
                 self.viewer.add_image([self.aligned_1], name='C1', scale=(
                     15/self.optical_slices, output_resolution, output_resolution), blending='additive', colormap='bop purple', translate=(0, int(start_y*output_resolution), int(start_z*output_resolution)))
@@ -331,9 +392,9 @@ class NapariSTPT:
                     15/self.optical_slices, output_resolution, output_resolution), blending='additive', colormap='bop blue', translate=(0, int(start_y*output_resolution), int(start_z*output_resolution)))
 
             # create naparimovie object
-            if self.movie is None:
-                self.movie = Movie(myviewer=self.viewer)
-                self.movie.inter_steps = 30
+            #if self.movie is None:
+                #self.movie = Movie(myviewer=self.viewer)
+                #self.movie.inter_steps = 30
 
     def LoadInRegion(self, text):
 
@@ -380,8 +441,8 @@ class NapariSTPT:
         # print("crop to: {} {} {} {}".format(minX, maxX, minY, maxY))
 
         self.crop = True
-
         self.Load(text)
+        self.crop = False
 
     def Load2D(self, text):
 
@@ -431,13 +492,13 @@ class NapariSTPT:
                 channel=1, type='mosaic', z=0).data * bscale + bzero
             im8 = ds8[slice_name].sel(
                 channel=1, type='mosaic', z=0).data * bscale + bzero
-            im16 = self.ds16[slice_name].sel(
+            im16 = ds16[slice_name].sel(
                 channel=1, type='mosaic', z=0).data * bscale + bzero
-            im32 = ds32[slice_name].sel(
+            self.im32 = ds32[slice_name].sel(
                 channel=1, type='mosaic', z=0).data * bscale + bzero
 
             with napari.gui_qt():
-                self.viewer.add_image([im1, im2, im4, im8, im16, im32], multiscale=True,
+                self.viewer.add_image([im1, im2, im4, im8, im16, self.im32], multiscale=True,
                                       name='C1', blending='additive', colormap='bop purple')
 
         if self.cb_C2.isChecked():
@@ -449,7 +510,7 @@ class NapariSTPT:
                 channel=2, type='mosaic', z=0).data * bscale + bzero
             im8 = ds8[slice_name].sel(
                 channel=2, type='mosaic', z=0).data * bscale + bzero
-            im16 = self.ds16[slice_name].sel(
+            im16 = ds16[slice_name].sel(
                 channel=2, type='mosaic', z=0).data * bscale + bzero
             im32 = ds32[slice_name].sel(
                 channel=2, type='mosaic', z=0).data * bscale + bzero
@@ -475,7 +536,7 @@ class NapariSTPT:
             with napari.gui_qt():
                 self.viewer.add_image([im1, im2, im4, im8, im16, im32], multiscale=True,
                                       name='C3', blending='additive', colormap='green')
-                # self.viewer.add_image(float_img, multiscale=False, name='C3', blending='additive', colormap='green')
+                #self.viewer.add_image(im4, multiscale=False, name='C3', blending='additive', colormap='green')
 
         if self.cb_C4.isChecked():
             im1 = self.ds1[slice_name].sel(
@@ -494,6 +555,7 @@ class NapariSTPT:
             with napari.gui_qt():
                 self.viewer.add_image([im1, im2, im4, im8, im16, im32], multiscale=True,
                                       name='C4', blending='additive', colormap='bop blue')
+
 
     def Align(self, volume, resolution, output_resolution):
 
@@ -546,6 +608,8 @@ class NapariSTPT:
             # transform.SetTranslation([0,0])
             print('{}/{}, translate_x: {}, translate_y: {}'.format(z,
                   z_size, alignX, alignY))
+            print('{}/{}, align_x[z]: {}, align_y[z]: {}'.format(z,
+                  z_size, self.align_x[z], self.align_y[z]))
 
             resampler = sitk.ResampleImageFilter()
             # resampler.SetReferenceImage(fixed)
@@ -561,6 +625,108 @@ class NapariSTPT:
 
             np_out = sitk.GetArrayFromImage(out)
             aligned[z, :, :] = np_out
+
+        return aligned.astype(dtype=np.float32)
+
+    def AlignNew(self, volume, resolution, output_resolution):
+        
+        if self.old_method:
+            spacing = (self.ds1['S001'].attrs['scale'])
+        else:
+            spacing = [float,float,float]
+            #print(self.ds1['S001'].attrs['scale'])
+            #print(json.loads(self.ds1['S001'].attrs['scale']))
+            #print(json.loads(self.ds1['S001'].attrs['scale'])["x"])
+            #print(type(json.loads(self.ds1['S001'].attrs['scale'])["x"]))
+            spacing[0] = float(json.loads(self.ds1['S001'].attrs['scale'])["x"])
+            spacing[1] = float(json.loads(self.ds1['S001'].attrs['scale'])["y"])
+            spacing[2] = float(json.loads(self.ds1['S001'].attrs['scale'])["z"])
+            print(spacing[0])
+            print(spacing[1])
+            print(spacing[2])
+
+        # size_multiplier = (resolution*0.1*spacing[0])/7.5
+        # print(resolution*0.1*spacing[0])
+        size_multiplier = (resolution*spacing[0])/output_resolution
+        size = (volume.shape[0], int(size_multiplier*volume.shape[1]), int(size_multiplier*volume.shape[2]))
+        aligned = np.zeros(size, dtype=np.float32)
+        size2D = (int(size_multiplier*volume.shape[2]), int(size_multiplier*volume.shape[1]))
+
+        #print("spacing: {}".format(spacing))
+        #print("volume.shape[0]: {}".format(volume.shape[0]))
+
+        z_size = volume.shape[0]
+        for z in range(1, z_size+1):
+
+            fixed = sitk.GetImageFromArray(volume[z-1, :, :])
+            fixed.SetOrigin((0, 0))
+
+            # slice_name = 'S00'+str(z+1)
+            # if(z+1 > 9):
+            #    slice_name = 'S0'+str(z+1)
+            # if(z+1 > 99):
+            #    slice_name = 'S'+str(z+1)
+            if self.old_method:
+                slice_name = self.slice_names[z-1]
+                print(slice_name)
+            else:
+                slice_name = f"S{z:03d}"
+
+                spacing[0] = float(json.loads(self.ds1[slice_name].attrs['scale'])["x"])
+                spacing[1] = float(json.loads(self.ds1[slice_name].attrs['scale'])["y"])
+                spacing[2] = float(json.loads(self.ds1[slice_name].attrs['scale'])["z"])
+
+            #print(spacing)
+            #spacing = (self.ds1[slice_name].attrs['scale'])
+            #print(f"spacing {spacing}")
+            # fixed.SetSpacing([1.6*spacing[0],1.6*spacing[1]])
+            #print(type(resolution))
+            #print(type(spacing[1]))
+            
+            fixed.SetSpacing([resolution*spacing[1],
+                             resolution*spacing[0]])
+
+            transform = sitk.Euler2DTransform()
+
+            if self.old_method:
+                alignY = 0
+                if not np.isnan(self.align_y[z-1]):
+                    alignY = -self.align_y[z-1]*0.1*spacing[1]
+
+                alignX = 0
+                if not np.isnan(self.align_x[z-1]):
+                    alignX = -self.align_x[z-1]*0.1*spacing[0]
+                print(alignY)
+            else:
+                alignX = self.ds1[slice_name].attrs['offsets']['x']*spacing[0]
+                alignY = self.ds1[slice_name].attrs['offsets']['y']*spacing[1]
+                print('{}/{}, offsets_x: {}, offsets_y: {}'.format(z, z_size, self.ds1[slice_name].attrs['offsets']['x'], self.ds1[slice_name].attrs['offsets']['y']))
+                # print('{}/{}, spacing[0]: {}, spacing[1]: {}'.format(z, z_size, spacing[0], spacing[1]))
+                
+                #alignX = 0
+                #alignY = 0
+
+            transform.SetTranslation([alignY, alignX])
+
+            # transform.SetTranslation([-align_y[z]*0.1*spacing[1],-align_x[z]*0.1*spacing[0]])
+            # transform.SetTranslation([0.5*-align_y[z],0.5*-align_x[z]])
+            # transform.SetTranslation([0,0])
+            # print('{}/{}, alignX: {}, alignY: {}'.format(z, z_size, alignX, alignY))
+
+            resampler = sitk.ResampleImageFilter()
+            # resampler.SetReferenceImage(fixed)
+
+            resampler.SetSize(size2D)
+            resampler.SetOutputSpacing([output_resolution, output_resolution])
+            resampler.SetOutputOrigin((0, 0))
+            resampler.SetInterpolator(sitk.sitkLinear)
+            resampler.SetDefaultPixelValue(0)
+            resampler.SetTransform(transform)
+
+            out = resampler.Execute(fixed)
+
+            np_out = sitk.GetArrayFromImage(out)
+            aligned[z-1, :, :] = np_out
 
         return aligned.astype(dtype=np.float32)
 
@@ -832,6 +998,8 @@ class NapariSTPT:
             self.viewer.add_image([self.aligned_4], name='C4', scale=(
                 15, output_resolution, output_resolution), blending='additive', colormap='bop blue')
 
+        self.viewer.layers.remove('Shapes')
+        
     def CropToRegion(self):
 
         output_resolution = float(self.pixel_size.text())
@@ -881,6 +1049,230 @@ class NapariSTPT:
             self.viewer.layers.remove('C4')
             self.viewer.add_image([self.aligned_4], name='C4', scale=(
                 15, output_resolution, output_resolution), blending='additive', colormap='bop blue', translate=(0, int(minX*output_resolution), int(minY*output_resolution)))
+            
+            
+        self.viewer.layers.remove('Shapes')
+
+                
+    def add_polygon_simple(self):
+
+        pos = int(self.viewer.cursor.position[0]/15)
+
+        data_length = len(self.viewer.layers['Shapes'].data[0])
+        print(data_length)
+
+        new_shape = []
+        for i in range(0, data_length):
+            
+            x = pos
+            y = self.viewer.layers['Shapes'].data[0][i][1]
+            z = self.viewer.layers['Shapes'].data[0][i][2]
+            new_shape.append((x,y,z))
+
+        new_shape = np.array(new_shape)
+        
+        shapes_layer = self.viewer.add_shapes(new_shape, shape_type='polygon', name = "Shapes", scale=(15, 15, 15),)
+    
+    
+    def add_polygon(self):
+
+        pos = int(self.viewer.cursor.position[0]/15)
+        
+        data_length = len(self.viewer.layers['Shapes'].data[0])
+        print(data_length)
+
+        contour_list = []
+        z_pos = self.viewer.layers["Shapes"].data[0][0][0] # z pos
+        contour = self.viewer.layers["Shapes"].data[0]
+        contour_list.append([z_pos,contour])
+
+        i = 1
+        while True:
+            layer_name = "Shapes [{}]".format(i)
+            try:
+                z_pos = self.viewer.layers[layer_name].data[0][0][0] # z pos
+                contour = self.viewer.layers[layer_name].data[0]
+                contour_list.append((z_pos,contour))
+                i = i+1
+            except:
+                break
+        contour_list_sorted = sorted(contour_list, key=lambda tup: tup[0])
+
+
+
+
+
+
+        
+            
+        new_shape = []
+
+        if pos < contour_list_sorted[0][0]:
+            for i in range(0, data_length):
+                x = pos
+                y = float(contour_list_sorted[0][1][i][1])
+                z = float(contour_list_sorted[0][1][i][2])
+
+                new_shape.append((x,y,z))
+
+        elif pos > contour_list_sorted[len(contour_list_sorted)-1][0]:
+            for i in range(0, data_length):
+                x = pos
+                y = float(contour_list_sorted[len(contour_list_sorted)-1][1][i][1])
+                z = float(contour_list_sorted[len(contour_list_sorted)-1][1][i][2])
+
+                new_shape.append((x,y,z))
+            
+        else:
+            z_i = 0
+            for i in range(0,len(contour_list_sorted)-1):
+                z_level_start = contour_list_sorted[i][0]
+                z_level_end = contour_list_sorted[i+1][0]
+                if pos >= z_level_start and pos <= z_level_end:
+                    z_i = i
+
+            for i in range(0, data_length):
+                x1 = float(contour_list_sorted[z_i][1][i][0])
+                y1 = float(contour_list_sorted[z_i][1][i][1])
+                z1 = float(contour_list_sorted[z_i][1][i][2])
+
+                x2 = float(contour_list_sorted[z_i+1][1][i][0])
+                y2 = float(contour_list_sorted[z_i+1][1][i][1])
+                z2 = float(contour_list_sorted[z_i+1][1][i][2])
+
+                weight2 = (pos - x1) / (x2 - x1)
+                weight = 1 - weight2
+
+                x = pos
+                y = (weight * y1) + (weight2 * y2)
+                z = (weight * z1) + (weight2 * z2)
+                new_shape.append((x,y,z))
+
+
+        new_shape = np.array(new_shape)
+        shapes_layer = self.viewer.add_shapes(new_shape, shape_type='polygon', name = "Shapes", scale=(15, 15, 15),)
+    
+
+
+
+
+    def run_remove_outside(self):
+
+        
+
+        
+        if self.aligned_1 is not None:
+            aligned1_tmp = np.copy(self.aligned_1)
+        if self.aligned_2 is not None:
+            aligned2_tmp = np.copy(self.aligned_2)
+        if self.aligned_3 is not None:
+            aligned3_tmp = np.copy(self.aligned_3)
+        if self.aligned_4 is not None:
+            aligned4_tmp = np.copy(self.aligned_4)
+
+        contour_list = []
+        z_pos = self.viewer.layers["Shapes"].data[0][0][0] # z pos
+        contour = self.viewer.layers["Shapes"].data[0]
+        contour_list.append([z_pos,contour])
+
+
+        i = 1
+        while True:
+            layer_name = "Shapes [{}]".format(i)
+            try:
+                z_pos = self.viewer.layers[layer_name].data[0][0][0] # z pos
+                contour = self.viewer.layers[layer_name].data[0]
+                contour_list.append((z_pos,contour))
+                i = i+1
+            except:
+                break
+        contour_list_sorted = sorted(contour_list, key=lambda tup: tup[0])
+        
+
+        
+
+        output_resolution = float(self.pixel_size.text())
+        data_length = len(self.viewer.layers['Shapes'].data[0])
+        print("data_length {}".format(data_length))
+
+        c = 0
+        width = 0
+        height = 0
+        if self.aligned_1 is not None:
+            c, width, height = self.aligned_1.shape
+        if self.aligned_2 is not None:
+            c, width, height = self.aligned_2.shape
+        if self.aligned_3 is not None:
+            c, width, height = self.aligned_3.shape
+        if self.aligned_4 is not None:
+            c, width, height = self.aligned_4.shape
+
+        for z_level in range(0,c):
+
+            z_i = -1
+            for i in range(0,len(contour_list_sorted)-1):
+                z_level_start = contour_list_sorted[i][0]
+                z_level_end = contour_list_sorted[i+1][0]
+                if z_level >= z_level_start and z_level <= z_level_end:
+                    z_i = i
+
+            if z_i == -1:
+                mask = np.zeros((width, height), dtype=int)
+            else:
+                polygon_values = []
+                for i in range(0, data_length):
+                    x1 = float(contour_list_sorted[z_i][1][i][0])
+                    y1 = float(contour_list_sorted[z_i][1][i][1])
+                    z1 = float(contour_list_sorted[z_i][1][i][2])
+
+                    x2 = float(contour_list_sorted[z_i+1][1][i][0])
+                    y2 = float(contour_list_sorted[z_i+1][1][i][1])
+                    z2 = float(contour_list_sorted[z_i+1][1][i][2])
+
+                    weight2 = (z_level - x1) / (x2 - x1)
+                    weight = 1 - weight2
+
+                    y = (weight * y1) + (weight2 * y2)
+                    z = (weight * z1) + (weight2 * z2)
+                    polygon_values.append((y, z))
+
+
+                img = Image.new('L', (width, height), 0)
+                ImageDraw.Draw(img).polygon(polygon_values, outline=1, fill=1)
+
+                mask = np.array(img)
+                mask = np.transpose(mask, (1,0))
+
+                #self.viewer.add_image([mask], name='mask', scale=(output_resolution, output_resolution), blending='additive', colormap='bop purple')
+                #aligned3_tmp[z_level,:,:] = aligned3_tmp[z_level,:,:] * mask
+
+            
+            if self.aligned_1 is not None:
+                aligned1_tmp[z_level,:,:] = aligned1_tmp[z_level,:,:] * mask
+            if self.aligned_2 is not None:
+                aligned2_tmp[z_level,:,:] = aligned2_tmp[z_level,:,:] * mask
+            if self.aligned_3 is not None:
+                aligned3_tmp[z_level,:,:] = aligned3_tmp[z_level,:,:] * mask
+            if self.aligned_4 is not None:
+                aligned4_tmp[z_level,:,:] = aligned4_tmp[z_level,:,:] * mask
+
+        
+        #self.viewer.layers.remove('C3')
+           
+
+
+        if self.aligned_1 is not None:
+            self.viewer.add_image([aligned1_tmp], name='C1_masked', scale=(15, output_resolution, output_resolution), blending='additive', colormap='bop purple', translate=(0, 0, 0))
+        if self.aligned_2 is not None:
+            self.viewer.add_image([aligned2_tmp], name='C2_masked', scale=(15, output_resolution, output_resolution), blending='additive', colormap='red', translate=(0, 0, 0))
+        if self.aligned_3 is not None:
+            self.viewer.add_image([aligned3_tmp], name='C3_masked', scale=(15, output_resolution, output_resolution), blending='additive', colormap='green', translate=(0, 0, 0))
+        if self.aligned_4 is not None:
+            self.viewer.add_image([aligned4_tmp], name='C4_masked', scale=(15, output_resolution, output_resolution), blending='additive', colormap='bop blue', translate=(0, 0, 0))
+
+
+        #self.viewer.layers.remove('Shapes')
+
 
     def SelectFolder(self):
         file = str(QtWidgets.QFileDialog.getExistingDirectory())
@@ -906,15 +1298,15 @@ class NapariSTPT:
             ) + str(self.comboBoxPath.currentText())+'/mos.zarr', consolidated=True)
             # print(ds.attrs["cube_reg"]['slice'])
             length = len(ds.attrs["multiscale"]['datasets'])
-            self.comboBoxResolution.clear()
-            # for n in reversed(range(0, length)):
-            for n in range(0, length):
-                print("adding resolution {}".format(
-                    ds.attrs["multiscale"]['datasets'][n]['level']))
-                self.comboBoxResolution.addItem(
-                    str(ds.attrs["multiscale"]['datasets'][n]['level']))
-                self.comboBoxResolution.setCurrentText(
-                    str(ds.attrs["multiscale"]['datasets'][n]['level']))
+            
+            #self.comboBoxResolution.clear()
+            #for n in range(0, length):
+            #    print("adding resolution {}".format(
+            #        ds.attrs["multiscale"]['datasets'][n]['level']))
+            #    self.comboBoxResolution.addItem(
+            #        str(ds.attrs["multiscale"]['datasets'][n]['level']))
+            #    self.comboBoxResolution.setCurrentText(
+            #        str(ds.attrs["multiscale"]['datasets'][n]['level']))
             try:
                 self.scroll.setValue(0)
                 self.image_slice.setText("0")
@@ -925,14 +1317,14 @@ class NapariSTPT:
                 pass
         else:
             print("adding default resolution")
-            self.comboBoxResolution.clear()
-            self.comboBoxResolution.addItem(str(1))
-            self.comboBoxResolution.addItem(str(2))
-            self.comboBoxResolution.addItem(str(4))
-            self.comboBoxResolution.addItem(str(8))
-            self.comboBoxResolution.addItem(str(16))
-            self.comboBoxResolution.addItem(str(32))
-            self.comboBoxResolution.setCurrentText(str(32))
+            #self.comboBoxResolution.clear()
+            #self.comboBoxResolution.addItem(str(1))
+            #self.comboBoxResolution.addItem(str(2))
+            #self.comboBoxResolution.addItem(str(4))
+            #self.comboBoxResolution.addItem(str(8))
+            #self.comboBoxResolution.addItem(str(16))
+            #self.comboBoxResolution.addItem(str(32))
+            #self.comboBoxResolution.setCurrentText(str(32))
 
     def set_image_slice_value(self):
         value = self.scroll.value()
@@ -961,6 +1353,14 @@ class NapariSTPT:
             if maxY < self.viewer.layers['Shapes'].data[0][i][1]:
                 maxY = self.viewer.layers['Shapes'].data[0][i][1]
 
+        minX2= minX / 2
+        #maxX = maxX / 2
+        minY2 = minY / 2
+        #maxY = maxY / 2
+                
+        maxX2 = (minX + (maxX - minX)/2)/2
+        maxY2 = (minY + (maxY - minY)/2)/2
+                
         print("{} {} {} {}".format(minX, maxX, minY, maxY))
         # return
         # prints a list of available models
@@ -990,6 +1390,9 @@ class NapariSTPT:
         # print(type(image))
         # return
         # normalize image
+        #ds1 = xr.open_zarr(self.search_folder.text(
+        #) + str(self.comboBoxPath.currentText())+'/mos.zarr', group='l.1')
+        
         im12 = self.ds1[slice_name].sel(
             channel=2, type='mosaic', z=0).data * bscale + bzero
         im12 = np.array(im12[int(minX):int(maxX), int(minY):int(maxY)])
@@ -997,6 +1400,10 @@ class NapariSTPT:
             channel=3, type='mosaic', z=0).data * bscale + bzero
         im13 = np.array(im13[int(minX):int(maxX), int(minY):int(maxY)])
 
+        #im12 = np.array(self.aligned_2)
+        #im13 = np.array(self.aligned_3)
+        
+        
         # img = np.array(im1[(im1.shape[0]/2)-1000:(im1.shape[0]/2)+1000,(im1.shape[1]/2)-1000:(im1.shape[1]/2)+1000,])
 
         img = im12 - ((0.128 * im13) + 17.371)
@@ -1012,41 +1419,65 @@ class NapariSTPT:
         # return
         # predict segmentation
         labels, details = model.predict_instances(img, n_tiles=(10, 10))
-        # print(details['points'])
+        print(type(details['points'].shape[0]))
+        print(details['points'].shape)
+        #print(details)
+        #print(labels.shape)
+        #print(type(labels))
+        
+        max_value = np.max(labels)
+        print(f'max_value {max_value}')
+        
+        refined_labels = labels.copy()
+        minimum_cc_sum = 100000
+        for label in range(max_value+1):
+            if np.sum(refined_labels[labels == label]) < minimum_cc_sum:
+                refined_labels[labels == label] = 0
+                
+                
+        refined_labels2 = labels.copy()
+        minimum_cc_sum = 100000
+        for label in range(max_value+1):
+            if np.sum(refined_labels2[labels == label]) > minimum_cc_sum:
+                refined_labels2[labels == label] = 0
 
         # with napari.gui_qt():
         self.viewer.add_image(
-            img, name='img', blending='additive', translate=(int(minX), int(minY)))
+            img, name='img', blending='additive', scale=(1,1), translate=(int(minX), int(minY)))
 
         self.viewer.add_image(
-            im12, name='im12', blending='additive', translate=(int(minX), int(minY)))
+            im12, name='im12', blending='additive', scale=(1,1), translate=(int(minX), int(minY)))
         self.viewer.add_image(
-            im13, name='im13', blending='additive', translate=(int(minX), int(minY)))
+            im13, name='im13', blending='additive', scale=(1,1), translate=(int(minX), int(minY)))
         self.viewer.add_labels(
-            labels, name='labels', blending='additive', translate=(int(minX), int(minY)))
+            labels, name='labels', blending='additive', scale=(1,1), translate=(int(minX), int(minY)))
+        self.viewer.add_labels(
+            refined_labels, name='refined_labels', blending='additive', scale=(1,1), translate=(int(minX), int(minY)))
+        self.viewer.add_labels(
+            refined_labels2, name='refined_labels2', blending='additive', scale=(1,1), translate=(int(minX), int(minY)))
         self.viewer.add_points(
             details['points'], translate=(int(minX), int(minY)))
 
-    def SaveMovie(self):
+    #def SaveMovie(self):
 
-        widget = QtWidgets.QWidget()
-        fname = QtWidgets.QFileDialog.getSaveFileName(
-            widget, 'Save file as', 'c:\\', "Image files (*.gif *.mp4)")
+        #widget = QtWidgets.QWidget()
+        #fname = QtWidgets.QFileDialog.getSaveFileName(
+        #    widget, 'Save file as', 'c:\\', "Image files (*.gif *.mp4)")
 
-        if isinstance(fname, tuple):
-            print(fname[0])
-            filename, file_extension = os.path.splitext(fname[0])
-            if file_extension == '.mp4':
-                self.movie.make_movie(name='movie.mp4', resolution=300, fps=20)
-            if file_extension == '.gif':
-                self.movie.make_gif('S:/Tristan/gifmovie.gif')
+        #if isinstance(fname, tuple):
+        #    print(fname[0])
+        #    filename, file_extension = os.path.splitext(fname[0])
+        #    if file_extension == '.mp4':
+        #        self.movie.make_movie(name='movie.mp4', resolution=300, fps=20)
+        #    if file_extension == '.gif':
+        #        self.movie.make_gif('S:/Tristan/gifmovie.gif')
 
     def SaveVolume(self):
         widget = QtWidgets.QWidget()
-        fname = QtWidgets.QFileDialog.getSaveFileName(
+        fname, _ = QtWidgets.QFileDialog.getSaveFileName(
             widget, 'Save file as', 'c:\\', "Image files (*.tiff *.mha)")
 
-        if isinstance(fname, tuple):
+        if fname != "":
             print(fname[0])
 
             output_resolution = float(self.pixel_size.text())
@@ -1092,6 +1523,50 @@ class NapariSTPT:
             volume_itk = caster.Execute(volume_itk)
             sitk.WriteImage(volume_itk, fname[0])
 
+    def SaveSlice(self):
+        widget = QtWidgets.QWidget()
+        fname = QtWidgets.QFileDialog.getSaveFileName(
+            widget, 'Save file as', 'c:\\', "Image files (*.tiff *.mha)")
+
+        if isinstance(fname, tuple):
+            print(fname[0])
+
+            bscale = self.ds1.attrs['bscale']
+            bzero = self.ds1.attrs['bzero']
+
+            z = self.scroll.value()
+
+            self.slice_names = self.ds1.attrs['cube_reg']['slice']
+
+            self.scroll.setRange(0, len(self.slice_names)-1)
+            if z >= len(self.slice_names):
+                z = len(self.slice_names)-1
+                self.scroll.setValue(z)
+
+            slice_name = self.slice_names[z]
+
+
+
+            output_resolution = float(self.pixel_size.text())
+            spacing = (output_resolution, output_resolution)
+
+            #im1 = (self.ds1[slice_name].sel(
+            #    channel=3, type='mosaic', z=0).data * bscale + bzero).astype(dtype=np.float32)
+
+                
+            ds32 = xr.open_zarr(self.search_folder.text(
+                ) + str(self.comboBoxPath.currentText())+'/mos.zarr', group='l.32')
+            im32 = (ds32[slice_name].sel(
+                channel=3, type='mosaic', z=0).data * bscale + bzero).astype(dtype=np.float32)
+
+            image_itk = sitk.GetImageFromArray(im32)
+            image_itk.SetSpacing(spacing)
+            caster = sitk.CastImageFilter()
+            caster.SetOutputPixelType(sitk.sitkVectorFloat32)
+            image_itk = caster.Execute(image_itk)
+            sitk.WriteImage(image_itk, fname[0])
+
+
     def main(self):
 
         with napari.gui_qt():
@@ -1103,7 +1578,16 @@ class NapariSTPT:
 
             hbox = QtWidgets.QHBoxLayout()
             hbox.addWidget(QtWidgets.QLabel("Data folder:"))
-            self.search_folder = QtWidgets.QLineEdit('N:/stpt/')
+            
+            print(sys.platform)
+            if sys.platform == 'linux':
+                if self.old_method:
+                    self.search_folder = QtWidgets.QLineEdit('/data/meds1_c/storage/processed/stpt')
+                else:
+                    self.search_folder = QtWidgets.QLineEdit('/data/meds1_a/eglez/stpt_out')
+            else:
+                self.search_folder = QtWidgets.QLineEdit('N:/stpt/')
+            
             self.search_folder.setMaximumWidth(250)
             hbox.addWidget(self.search_folder)
             bSelectFolder = QtWidgets.QPushButton('Set folder')
@@ -1133,15 +1617,15 @@ class NapariSTPT:
             vbox.addLayout(hbox)
 
             hbox = QtWidgets.QHBoxLayout()
-            hbox.addWidget(QtWidgets.QLabel("Load level:"))
-            self.comboBoxResolution = QtWidgets.QComboBox()
-            self.comboBoxResolution.setMaximumWidth(100)
-            self.on_combobox_changed()
-            hbox.addWidget(self.comboBoxResolution)
-            hbox.addStretch(1)
+            #hbox.addWidget(QtWidgets.QLabel("Load level:"))
+            #self.comboBoxResolution = QtWidgets.QComboBox()
+            #self.comboBoxResolution.setMaximumWidth(100)
+            #self.on_combobox_changed()
+            #hbox.addWidget(self.comboBoxResolution)
+            #hbox.addStretch(1)
 
             hbox.addWidget(QtWidgets.QLabel("Output pixel size:"))
-            self.pixel_size = QtWidgets.QLineEdit("7.5")
+            self.pixel_size = QtWidgets.QLineEdit("15")
             self.pixel_size.setMaximumWidth(50)
             hbox.addWidget(self.pixel_size)
             hbox.addStretch(1)
@@ -1249,32 +1733,57 @@ class NapariSTPT:
             vbox.addLayout(hbox)
 
 
+            hbox = QtWidgets.QHBoxLayout()
+
+            bSaveSlice = QtWidgets.QPushButton('Save slice')
+            bSaveSlice.setCheckable(True)
+            bSaveSlice.clicked.connect(self.SaveSlice)
+            hbox.addWidget(bSaveSlice)
+
             bSaveVolume = QtWidgets.QPushButton('Save volume')
             bSaveVolume.setCheckable(True)
             bSaveVolume.clicked.connect(self.SaveVolume)
-            hbox = QtWidgets.QHBoxLayout()
             hbox.addWidget(bSaveVolume)
 
-            bSaveMovie = QtWidgets.QPushButton('Save movie')
-            bSaveMovie.setCheckable(True)
-            bSaveMovie.clicked.connect(self.SaveMovie)
-            hbox.addWidget(bSaveMovie)
+            #bSaveMovie = QtWidgets.QPushButton('Save movie')
+            #bSaveMovie.setCheckable(True)
+            #bSaveMovie.clicked.connect(self.SaveMovie)
+            #hbox.addWidget(bSaveMovie)
             hbox.addStretch(1)
             vbox.addLayout(hbox)
 
-            bStardist = QtWidgets.QPushButton('Run Stardist in shape')
-            bStardist.setCheckable(True)
-            bStardist.clicked.connect(self.run_stardist)
+            #bStardist = QtWidgets.QPushButton('Run Stardist in shape')
+            #bStardist.setCheckable(True)
+            #bStardist.clicked.connect(self.run_stardist)
+            #hbox = QtWidgets.QHBoxLayout()
+            #hbox.addWidget(bStardist)
+            #hbox.addStretch(1)
+            #vbox.addLayout(hbox)
+
+            #vbox.addStretch(1)
+            
+            bAddPolygon = QtWidgets.QPushButton('Add')
+            bAddPolygon.setCheckable(True)
+            bAddPolygon.clicked.connect(self.add_polygon)
+            bRemoveOutside = QtWidgets.QPushButton('Remove outside interpolated region')
+            bRemoveOutside.setCheckable(True)
+            bRemoveOutside.clicked.connect(self.run_remove_outside)
             hbox = QtWidgets.QHBoxLayout()
-            hbox.addWidget(bStardist)
+            hbox.addWidget(bAddPolygon)
+            hbox.addWidget(bRemoveOutside)
             hbox.addStretch(1)
             vbox.addLayout(hbox)
 
             vbox.addStretch(1)
 
+
+
             
             widget.setLayout(vbox)
             self.viewer.window.add_dock_widget(widget, area="right")
+
+            animation_widget = AnimationWidget(self.viewer)
+            self.viewer.window.add_dock_widget(animation_widget, area='right')
 
             # inputfile = ''
             # try:
