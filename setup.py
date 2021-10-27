@@ -11,12 +11,12 @@ with open(os.path.join(HERE, "README.md")) as fid:
     README = fid.read()
 
 # this grabs the requirements from requirements.txt
-REQUIREMENTS = [i.strip() for i in open("requirements.txt").readlines()]
+#REQUIREMENTS = [i.strip() for i in open("requirements.txt").readlines()]
 
 # This call to setup() does all the work
 setup(
     name="napari-stpt",
-    version="0.0.8.13",
+    version="0.0.8.20",
     description="napari viewer which can read stpt images as zarr files",
     long_description=README,
     long_description_content_type="text/markdown",
@@ -30,6 +30,17 @@ setup(
     ],
     packages=["napari_stpt"],
     include_package_data=True,
-    install_requires=REQUIREMENTS,
+    install_requires=[
+        'napari',
+        'numpy',
+        'xarray',
+        'qtpy',
+        'pyqt5',
+        'SimpleITK',
+        'opencv-python',
+        'zarr',
+        'stardist',
+        'tensorflow'
+    ],
     entry_points={"console_scripts": ["napari-stpt=napari_stpt.__main__:main"]},
 )
