@@ -16,7 +16,7 @@ with open(os.path.join(HERE, "README.md")) as fid:
 # This call to setup() does all the work
 setup(
     name="napari-stpt",
-    version="0.0.8.23",
+    version="0.0.8.24",
     description="napari viewer which can read stpt images as zarr files",
     long_description=README,
     long_description_content_type="text/markdown",
@@ -41,6 +41,7 @@ setup(
         'zarr',
         'stardist',
         'tensorflow'
+        'napari-animation'
     ],
     entry_points={"console_scripts": ["napari-stpt=napari_stpt.__main__:main"]},
 )
