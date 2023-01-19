@@ -11,13 +11,13 @@ from qtpy import QtCore, QtWidgets
 import SimpleITK as sitk
 from scipy import ndimage, stats
 import cv2
-from stardist.models import StarDist2D
+#from stardist.models import StarDist2D
 from napari_animation import AnimationWidget
 from PIL import Image, ImageDraw
 import random
 # import skimage.io
 # from stardist.models import StarDist3D
-from csbdeep.utils import normalize
+#from csbdeep.utils import normalize
 #from naparimovie import Movie
 import math
 import gc
@@ -44,6 +44,18 @@ class NapariSTPT:
         self.aligned_2 = None
         self.aligned_3 = None
         self.aligned_4 = None
+        self.current_output_resolution = None
+
+        cb_R_Old = None
+        cb_R_New = None
+        self.spacing = [0,0,0]
+        
+        self.origin_x = None
+        self.origin_y = None
+        self.crop_start_x = None
+        self.crop_start_y = None
+        self.crop_end_x = None
+        self.crop_end_y = None
 
         self.spinN = None
         self.maxSizeN = None
@@ -68,6 +80,7 @@ class NapariSTPT:
         self.optical_slices_available = None
         self.cb_correct_brightness_optical_section = None
         self.shape = None
+        self.spacing_loaded = None
 
         self.crop_start_ratio_x = None
         self.crop_size_ratio_x = None
@@ -75,7 +88,7 @@ class NapariSTPT:
         self.crop_size_ratio_y = None
 
         self.crop = False
-        self.old_method = True
+        self.old_method = False
 
         self.start_slice = None
         self.end_slice = None
@@ -84,27 +97,101 @@ class NapariSTPT:
         self.m_slice_spacing = None
         self.slice_spacing = None
         
-    def CropOriginal(self, volume):
 
-        threshold = float(self.thresholdN.text())
+    def Make3DShape(self):
 
-        tissue = volume > threshold
-        objs = ndimage.find_objects(tissue)
-        maxX = int(objs[0][0].stop)
-        minX = int(objs[0][0].start)
-        maxY = int(objs[0][1].stop)
-        minY = int(objs[0][1].start)
-        maxZ = int(objs[0][2].stop)
-        minZ = int(objs[0][2].start)
-
-        print("cropping to {}-{},{}-{},{}-{}".format(minX,
-              maxX, minY, maxY, minZ, maxZ))
-
-        volume = volume[minX:maxX, minY:maxY, minZ:maxZ]
-
-        return volume
+        output_resolution = float(self.pixel_size.text())
         
+        data_length = len(self.viewer.layers['Shapes'].data[0])
+        print(data_length)
+        
+        minX = 100000000
+        maxX = 0
+        minY = 100000000
+        maxY = 0
+        for i in range(0, data_length):
+            print(self.viewer.layers['Shapes'].data[0][i])
+            if minX > self.viewer.layers['Shapes'].data[0][i][1]:
+                minX = self.viewer.layers['Shapes'].data[0][i][1]
+            if maxX < self.viewer.layers['Shapes'].data[0][i][1]:
+                maxX = self.viewer.layers['Shapes'].data[0][i][1]
+            if minY > self.viewer.layers['Shapes'].data[0][i][2]:
+                minY = self.viewer.layers['Shapes'].data[0][i][2]
+            if maxY < self.viewer.layers['Shapes'].data[0][i][2]:
+                maxY = self.viewer.layers['Shapes'].data[0][i][2]
+
+        #print("crop to: {} {} {} {}".format(minX, maxX, minY, maxY))
+
+        
+        size_x = self.shape[0] * float(self.slice_spacing)/float(self.optical_slices) / output_resolution
+        size_y = maxX
+        size_z = maxY
+
+        line_locations = []
+        line_locations.append([[0, minX, minY], [size_x, minX, minY]])
+        line_locations.append([[size_x, minX, minY], [size_x, size_y, minY]])
+        line_locations.append([[size_x, size_y, minY], [0, size_y, minY]])
+        line_locations.append([[0, size_y, minY], [0, minX, minY]])
+
+        line_locations.append([[0, minX, size_z], [size_x, minX, size_z]])
+        line_locations.append([[size_x, minX, size_z], [size_x, size_y, size_z]])
+        line_locations.append([[size_x, size_y, size_z], [0, size_y, size_z]])
+        line_locations.append([[0, size_y, size_z], [0, minX, size_z]])
+        
+        line_locations.append([[0, minX, minY], [0, minX, size_z]])
+        line_locations.append([[size_x, minX, minY], [size_x, minX, size_z]])
+        line_locations.append([[size_x, size_y, minY], [size_x, size_y, size_z]])
+        line_locations.append([[0, size_y, minY], [0, size_y, size_z]])
+
+        width = np.mean([size_x, size_y, size_z]) / 300
+        
+        self.viewer.add_shapes(np.asarray(line_locations), name = 'crop box',shape_type='line', edge_color = "white", edge_width = width)
+
+
+
+    def MakeBoundingBox(self):
+        #with napari.gui_qt():
+
+        print(self.shape)
+        print(self.slice_spacing)
+
+        output_resolution = float(self.pixel_size.text())
+        # scale=(float(self.slice_spacing)/float(self.optical_slices), output_resolution, output_resolution)
+
+        size_x = (self.shape[0]-1) * float(self.slice_spacing)/float(self.optical_slices) / output_resolution
+        size_y = (self.shape[1]-1)#  * output_resolution
+        size_z = (self.shape[2]-1)#  * output_resolution
+
+        line_locations = []
+        line_locations.append([[0, 0, 0], [size_x, 0, 0]])
+        line_locations.append([[size_x, 0, 0], [size_x, size_y, 0]])
+        line_locations.append([[size_x, size_y, 0], [0, size_y, 0]])
+        line_locations.append([[0, size_y, 0], [0, 0, 0]])
+
+        line_locations.append([[0, 0, size_z], [size_x, 0, size_z]])
+        line_locations.append([[size_x, 0, size_z], [size_x, size_y, size_z]])
+        line_locations.append([[size_x, size_y, size_z], [0, size_y, size_z]])
+        line_locations.append([[0, size_y, size_z], [0, 0, size_z]])
+        
+        line_locations.append([[0, 0, 0], [0, 0, size_z]])
+        line_locations.append([[size_x, 0, 0], [size_x, 0, size_z]])
+        line_locations.append([[size_x, size_y, 0], [size_x, size_y, size_z]])
+        line_locations.append([[0, size_y, 0], [0, size_y, size_z]])
+
+        width = np.mean([size_x, size_y, size_z]) / 300
+        
+        self.viewer.add_shapes(np.asarray(line_locations), name = 'bounding box',shape_type='line', edge_color = "white", edge_width = width)
+        #triangle = np.array([[0, 0, 0], [1000, 1000, 1000], [0, 0, 1000]])
+        #polygons = [triangle]
+
+        # self.shape = self.aligned_4.shape
+        #self.viewer.add_image([self.aligned_4], name='C4', scale=(float(self.slice_spacing)/float(self.optical_slices), output_resolution, output_resolution), blending='additive', colormap='bop blue', contrast_limits=[0,30])#, translate=(0, int(start_y*output_resolution), int(start_z*output_resolution)))
+        #shapes_layer = self.viewer.add_shapes(polygons, shape_type='polygon', edge_width=5,
+        #              edge_color='coral', face_color='royalblue')
+
     def Load(self, text):
+        if any(i.name == 'bounding box' for i in self.viewer.layers):
+            self.viewer.layers.remove('bounding box')
 
         try:
             self.viewer.layers.remove('C1')
@@ -159,8 +246,21 @@ class NapariSTPT:
 
         #print(self.ds1['S002'].attrs['offsets']['x'])
         # print(self.ds1['S002'].attrs['bscale'])
-        # print(json.loads(self.ds1['S002'].attrs['scale'])["x"])
-        # print(json.loads(self.ds1['S002'].attrs['scale'])["y"])
+
+        if self.old_method:
+            self.spacing = (self.ds1['S001'].attrs['scale'])
+        else:
+            self.spacing = [0,0,0]
+            print(float(json.loads(self.ds1['S001'].attrs['scale'])["x"]))
+            print(float(json.loads(self.ds1['S001'].attrs['scale'])["y"]))
+            print(float(json.loads(self.ds1['S001'].attrs['scale'])["z"]))
+            self.spacing[0] = 10 * float(json.loads(self.ds1['S001'].attrs['scale'])["x"])
+            self.spacing[1] = 10 * float(json.loads(self.ds1['S001'].attrs['scale'])["y"])
+            self.spacing[2] = 10 * float(json.loads(self.ds1['S001'].attrs['scale'])["z"])
+            
+        print(f"spacing {self.spacing}")
+        #print(json.loads(self.ds1['S001'].attrs['scale'])["x"])
+        #print(json.loads(self.ds1['S001'].attrs['scale'])["y"])
         # print(json.loads(self.ds1['S002'].attrs['scale'])["z"])
 
         #print(type(self.ds1['S002'].attrs['scale']))
@@ -241,263 +341,343 @@ class NapariSTPT:
 
         print(f"optical_slices used: {self.optical_slices}")
 
-        self.corrected_align_x = []
-        for index, value in enumerate(self.align_x):
-            if (index % self.optical_slices_available) < self.optical_slices:
-                self.corrected_align_x.append(value)
+        if self.old_method:
+            self.corrected_align_x = []
+            for index, value in enumerate(self.align_x):
+                if (index % self.optical_slices_available) < self.optical_slices:
+                    self.corrected_align_x.append(value)
 
-        #self.align_x = self.corrected_align_x
-        #print(f"self.align_x shape {len(self.corrected_align_x)}")
+            #self.align_x = self.corrected_align_x
+            #print(f"self.align_x shape {len(self.corrected_align_x)}")
 
-        self.corrected_align_y = []
-        for index, value in enumerate(self.align_y):
-            if (index % self.optical_slices_available) < self.optical_slices:
-                self.corrected_align_y.append(value)
+            self.corrected_align_y = []
+            for index, value in enumerate(self.align_y):
+                if (index % self.optical_slices_available) < self.optical_slices:
+                    self.corrected_align_y.append(value)
 
-        #self.align_y = corrected_align_y
-        print(f"align_y  {self.align_y}")
-        print("")
-        print(f"corrected_align_y {self.corrected_align_y}")
-        print("")
+            #self.align_y = corrected_align_y
+            #print(f"align_y  {self.align_y}")
+            #print("")
+            #print(f"corrected_align_y {self.corrected_align_y}")
+            #print("")
 
-        for i in range(0,self.optical_slices):
-            self.corrected_align_y[i::self.optical_slices] = self.corrected_align_y[::self.optical_slices]
+            for i in range(0,self.optical_slices):
+                self.corrected_align_y[i::self.optical_slices] = self.corrected_align_y[::self.optical_slices]
+                
+            #print(f"corrected_align_y {self.corrected_align_y}")
+            #print("")
+
+        # with napari.gui_qt():
+        self.viewer.window.qt_viewer.camera._3D_camera.fov = 45
+
+        self.current_output_resolution = float(self.pixel_size.text())
+        
+        if self.cb_C1.isChecked():
+            print("loading C1")
+
+            volume_1_temp = (ds.sel(channel=1, type='mosaic', z=0).to_array(
+            ).data * bscale + bzero).astype(dtype=np.float32)
+
+            if self.start_slice.text() == "":
+                start_slice_number = 0
+                chop_bottom = 0
+            else:
+                start_slice_number = int(math.floor(float(self.start_slice.text())/float(self.optical_slices)))
+                chop_bottom = int(self.start_slice.text()) - (self.optical_slices * start_slice_number) 
+            if self.end_slice.text() == "":
+                end_slice_number = volume_1_temp.shape[0]-1
+                chop_top = 0
+            else:
+                end_slice_number = int(math.floor(float(self.end_slice.text())/float(self.optical_slices)))
+                chop_top = (self.optical_slices * (end_slice_number + 1) -1) - int(self.end_slice.text()) 
+
+            number_of_slices = end_slice_number - start_slice_number + 1
+
+            #if self.crop:
+            #    size_y = int(math.floor(
+            #        volume_1_temp.shape[1]/self.crop_size_ratio_x))
+            #    size_z = int(math.floor(
+            #       volume_1_temp.shape[2]/self.crop_size_ratio_y))
+            #    start_y = int(math.floor(
+            #        volume_1_temp.shape[1]/self.crop_start_ratio_x))
+            #   start_z = int(math.floor(
+            #       volume_1_temp.shape[2]/self.crop_start_ratio_y))
+            if self.crop:
+                # spacing = (self.ds1['S001'].attrs['scale'])
+                spacing_x = resolution*0.1*self.spacing[0]
+                spacing_y = resolution*0.1*self.spacing[1]
+                #print(f"spacing[0] {self.spacing[0]}")
+                #print(f"spacing_x {spacing_x}")
+
+                size_y = int(math.floor((self.crop_end_x - self.crop_start_x) / spacing_x))
+                size_z = int(math.floor((self.crop_end_y - self.crop_start_y) / spacing_y))
+                start_y = int(math.floor(self.crop_start_x / spacing_x))
+                start_z = int(math.floor(self.crop_start_y / spacing_y))
+            else:
+                size_y = int(math.floor(volume_1_temp.shape[1]))
+                size_z = int(math.floor(volume_1_temp.shape[2]))
+                start_y = 0
+                start_z = 0
+
+            volume_1 = np.zeros((self.optical_slices*number_of_slices, size_y, size_z), dtype=np.float32)
+            volume_1[0::self.optical_slices, :, :] = volume_1_temp[start_slice_number:end_slice_number+1, start_y:start_y+size_y, start_z:start_z+size_z]
+
+            for optical_slice in range(1, self.optical_slices):
+                volume_1_temp = (ds.sel(channel=1, type='mosaic', z=optical_slice).to_array(
+                ).data * bscale + bzero).astype(dtype=np.float32)
+                volume_1[optical_slice::self.optical_slices, :, :] = volume_1_temp[start_slice_number:end_slice_number+1, start_y:start_y+size_y, start_z:start_z+size_z]
+
+            # self.aligned_2 = volume_2
+            if self.cb_correct_brightness_optical_section.isChecked():
+                print("correcting brightness of optical sections C2")
+                self.Normalize_slices(volume_1, self.optical_slices)
+
+            print("aligning C1")
+            if self.old_method:
+                self.aligned_1 = self.AlignNew(volume_1, resolution, output_resolution, start_slice_number*self.optical_slices)
+            else:
+                self.aligned_1 = self.AlignNew(volume_1, resolution, output_resolution, start_slice_number*self.optical_slices)
+                
+            self.aligned_1 = self.aligned_1[chop_bottom:self.aligned_1.shape[0]-chop_top,:,:]
+            self.shape = self.aligned_1.shape
+            # self.viewer.add_image([self.aligned_1], name='C1', scale=(float(self.slice_spacing)/float(self.optical_slices), output_resolution, output_resolution), blending='additive', colormap='bop purple', contrast_limits=[0,30])#, translate=(0, int(start_y*output_resolution), int(start_z*output_resolution)))
+            self.viewer.add_image([self.aligned_1], name='C1', scale=(float(self.slice_spacing)/float(self.optical_slices) / output_resolution, 1, 1), blending='additive', colormap='bop purple', contrast_limits=[0,30])#, translate=(0, int(start_y*output_resolution), int(start_z*output_resolution)))
+
+        if self.cb_C2.isChecked():
+            print("loading C2")
+
+            volume_2_temp = (ds.sel(channel=2, type='mosaic', z=0).to_array(
+            ).data * bscale + bzero).astype(dtype=np.float32)
+
+            if self.start_slice.text() == "":
+                start_slice_number = 0
+                chop_bottom = 0
+            else:
+                start_slice_number = int(math.floor(float(self.start_slice.text())/float(self.optical_slices)))
+                chop_bottom = int(self.start_slice.text()) - (self.optical_slices * start_slice_number) 
+            if self.end_slice.text() == "":
+                end_slice_number = volume_2_temp.shape[0]-1
+                chop_top = 0
+            else:
+                end_slice_number = int(math.floor(float(self.end_slice.text())/float(self.optical_slices)))
+                chop_top = (self.optical_slices * (end_slice_number + 1) -1) - int(self.end_slice.text()) 
+
+            number_of_slices = end_slice_number - start_slice_number + 1
+
+            # if self.crop:
+            #     size_y = int(math.floor(
+            #         volume_2_temp.shape[1]/self.crop_size_ratio_x))
+            #     size_z = int(math.floor(
+            #         volume_2_temp.shape[2]/self.crop_size_ratio_y))
+            #     start_y = int(math.floor(
+            #         volume_2_temp.shape[1]/self.crop_start_ratio_x))
+            #     start_z = int(math.floor(
+            #         volume_2_temp.shape[2]/self.crop_start_ratio_y))
+            if self.crop:
+                # spacing = (self.ds1['S001'].attrs['scale'])
+                spacing_x = resolution*0.1*self.spacing[0]
+                spacing_y = resolution*0.1*self.spacing[1]
+
+                size_y = int(math.floor((self.crop_end_x - self.crop_start_x) / spacing_x))
+                size_z = int(math.floor((self.crop_end_y - self.crop_start_y) / spacing_y))
+                start_y = int(math.floor(self.crop_start_x / spacing_x))
+                start_z = int(math.floor(self.crop_start_y / spacing_y))
+            else:
+                size_y = int(math.floor(volume_2_temp.shape[1]))
+                size_z = int(math.floor(volume_2_temp.shape[2]))
+                start_y = 0
+                start_z = 0
+
+            volume_2 = np.zeros((self.optical_slices*number_of_slices, size_y, size_z), dtype=np.float32)
+            volume_2[0::self.optical_slices, :, :] = volume_2_temp[start_slice_number:end_slice_number+1, start_y:start_y+size_y, start_z:start_z+size_z]
+
+            for optical_slice in range(1, self.optical_slices):
+                volume_2_temp = (ds.sel(channel=2, type='mosaic', z=optical_slice).to_array(
+                ).data * bscale + bzero).astype(dtype=np.float32)
+                volume_2[optical_slice::self.optical_slices, :, :] = volume_2_temp[start_slice_number:end_slice_number+1, start_y:start_y+size_y, start_z:start_z+size_z]
+
+            # self.aligned_2 = volume_2
+            if self.cb_correct_brightness_optical_section.isChecked():
+                print("correcting brightness of optical sections C2")
+                self.Normalize_slices(volume_2, self.optical_slices)
+
+            print("aligning C2")
+            if self.old_method:
+                self.aligned_2 = self.AlignNew(volume_2, resolution, output_resolution, start_slice_number*self.optical_slices)
+            else:
+                self.aligned_2 = self.AlignNew(volume_2, resolution, output_resolution, start_slice_number*self.optical_slices)
+
+            self.aligned_2 = self.aligned_2[chop_bottom:self.aligned_2.shape[0]-chop_top,:,:]
+            self.shape = self.aligned_2.shape
+            # self.viewer.add_image([self.aligned_2], name='C2', scale=(float(self.slice_spacing)/float(self.optical_slices), output_resolution, output_resolution), blending='additive', colormap='red', contrast_limits=[0,30])#, translate=(0, int(start_y*output_resolution), int(start_z*output_resolution)))
+            self.viewer.add_image([self.aligned_2], name='C2', scale=(float(self.slice_spacing)/float(self.optical_slices) / output_resolution, 1, 1), blending='additive', colormap='red', contrast_limits=[0,30])#, translate=(0, int(start_y*output_resolution), int(start_z*output_resolution)))
+
+        if self.cb_C3.isChecked():
+            print("loading C3")
+
+            volume_3_temp = (ds.sel(channel=3, type='mosaic', z=0).to_array(
+            ).data * bscale + bzero).astype(dtype=np.float32)
+
+            print(volume_3_temp.shape)
+
+            if self.start_slice.text() == "":
+                start_slice_number = 0
+                chop_bottom = 0
+            else:
+                start_slice_number = int(math.floor(float(self.start_slice.text())/float(self.optical_slices)))
+                chop_bottom = int(self.start_slice.text()) - (self.optical_slices * start_slice_number) 
+
+            if self.end_slice.text() == "":
+                end_slice_number = volume_3_temp.shape[0]-1
+                chop_top = 0
+            else:
+                end_slice_number = int(math.floor(float(self.end_slice.text())/float(self.optical_slices)))
+                chop_top = (self.optical_slices * (end_slice_number + 1) -1) - int(self.end_slice.text())
+
+            number_of_slices = end_slice_number - start_slice_number + 1
+
+            # if self.crop:
+            #     size_y = int(math.floor(
+            #         volume_3_temp.shape[1]/self.crop_size_ratio_x))
+            #     size_z = int(math.floor(
+            #         volume_3_temp.shape[2]/self.crop_size_ratio_y))
+            #     start_y = int(math.floor(
+            #         volume_3_temp.shape[1]/self.crop_start_ratio_x))
+            #     start_z = int(math.floor(
+            #         volume_3_temp.shape[2]/self.crop_start_ratio_y))
+            if self.crop:
+                # spacing = (self.ds1['S001'].attrs['scale'])
+                spacing_x = resolution*0.1*self.spacing[0]
+                spacing_y = resolution*0.1*self.spacing[1]
+
+                size_y = int(math.floor((self.crop_end_x - self.crop_start_x) / spacing_x))
+                size_z = int(math.floor((self.crop_end_y - self.crop_start_y) / spacing_y))
+                start_y = int(math.floor(self.crop_start_x / spacing_x))
+                start_z = int(math.floor(self.crop_start_y / spacing_y))
+            else:
+                size_y = int(math.floor(volume_3_temp.shape[1]))
+                size_z = int(math.floor(volume_3_temp.shape[2]))
+                start_y = 0
+                start_z = 0
+
+
             
-        print(f"corrected_align_y {self.corrected_align_y}")
-        print("")
+            print(f"start_y {start_y}, start_z {start_z}, size_y {size_y}, size_z {size_z}")
 
-        with napari.gui_qt():
-            if self.cb_C1.isChecked():
-                print("loading C1")
+            volume_3 = np.zeros((self.optical_slices*number_of_slices, size_y, size_z), dtype=np.float32)
+            print(volume_3_temp[start_slice_number:end_slice_number+1, start_y:start_y+size_y, start_z:start_z+size_z].shape)
+            print(volume_3[0::self.optical_slices, :, :].shape)
+            volume_3[0::self.optical_slices, :, :] = volume_3_temp[start_slice_number:end_slice_number+1, start_y:start_y+size_y, start_z:start_z+size_z]
 
-                volume_1_temp = (ds.sel(channel=1, type='mosaic', z=0).to_array(
+            for optical_slice in range(1, self.optical_slices):
+                volume_3_temp = (ds.sel(channel=3, type='mosaic', z=optical_slice).to_array(
                 ).data * bscale + bzero).astype(dtype=np.float32)
+                volume_3[optical_slice::self.optical_slices, :, :] = volume_3_temp[start_slice_number:end_slice_number+1, start_y:start_y+size_y, start_z:start_z+size_z]
 
-                if self.start_slice.text() == "":
-                    start_slice_number = 0
-                    chop_bottom = 0
-                else:
-                    start_slice_number = int(math.floor(float(self.start_slice.text())/float(self.optical_slices)))
-                    chop_bottom = int(self.start_slice.text()) - (self.optical_slices * start_slice_number) 
-                if self.end_slice.text() == "":
-                    end_slice_number = volume_1_temp.shape[0]-1
-                    chop_top = 0
-                else:
-                    end_slice_number = int(math.floor(float(self.end_slice.text())/float(self.optical_slices)))
-                    chop_top = (self.optical_slices * (end_slice_number + 1) -1) - int(self.end_slice.text()) 
+            # self.aligned_3 = volume_3
+            if self.cb_correct_brightness_optical_section.isChecked():
+                print("correcting brightness of optical sections C2")
+                self.Normalize_slices(volume_3, self.optical_slices)
 
-                number_of_slices = end_slice_number - start_slice_number + 1
-
-                if self.crop:
-                    size_y = int(math.floor(
-                        volume_1_temp.shape[1]/self.crop_size_ratio_x))
-                    size_z = int(math.floor(
-                        volume_1_temp.shape[2]/self.crop_size_ratio_y))
-                    start_y = int(math.floor(
-                        volume_1_temp.shape[1]/self.crop_start_ratio_x))
-                    start_z = int(math.floor(
-                        volume_1_temp.shape[2]/self.crop_start_ratio_y))
-                else:
-                    size_y = int(math.floor(volume_1_temp.shape[1]))
-                    size_z = int(math.floor(volume_1_temp.shape[2]))
-                    start_y = 0
-                    start_z = 0
-
-                volume_1 = np.zeros((self.optical_slices*number_of_slices, size_y, size_z), dtype=np.float32)
-                volume_1[0::self.optical_slices, :, :] = volume_1_temp[start_slice_number:end_slice_number+1, start_y:start_y+size_y, start_z:start_z+size_z]
-
-                for optical_slice in range(1, self.optical_slices):
-                    volume_1_temp = (ds.sel(channel=1, type='mosaic', z=optical_slice).to_array(
-                    ).data * bscale + bzero).astype(dtype=np.float32)
-                    volume_1[optical_slice::self.optical_slices, :, :] = volume_1_temp[start_slice_number:end_slice_number+1, start_y:start_y+size_y, start_z:start_z+size_z]
-
-                # self.aligned_2 = volume_2
-                if self.cb_correct_brightness_optical_section.isChecked():
-                    print("correcting brightness of optical sections C2")
-                    self.Normalize_slices(volume_1, self.optical_slices)
-
-                print("aligning C1")
-                self.aligned_1 = self.Align(volume_1, resolution, output_resolution, start_slice_number*self.optical_slices)
-                #self.aligned_1 = volume_1
-                self.aligned_1 = self.aligned_1[chop_bottom:self.aligned_1.shape[0]-chop_top,:,:]
-                self.shape = self.aligned_1.shape
-                self.viewer.add_image([self.aligned_1], name='C1', scale=(float(self.slice_spacing)/float(self.optical_slices), output_resolution, output_resolution), blending='additive', colormap='bop purple', contrast_limits=[0,30])#, translate=(0, int(start_y*output_resolution), int(start_z*output_resolution)))
-
-            if self.cb_C2.isChecked():
-                print("loading C2")
-
-                volume_2_temp = (ds.sel(channel=2, type='mosaic', z=0).to_array(
-                ).data * bscale + bzero).astype(dtype=np.float32)
-
-                if self.start_slice.text() == "":
-                    start_slice_number = 0
-                    chop_bottom = 0
-                else:
-                    start_slice_number = int(math.floor(float(self.start_slice.text())/float(self.optical_slices)))
-                    chop_bottom = int(self.start_slice.text()) - (self.optical_slices * start_slice_number) 
-                if self.end_slice.text() == "":
-                    end_slice_number = volume_2_temp.shape[0]-1
-                    chop_top = 0
-                else:
-                    end_slice_number = int(math.floor(float(self.end_slice.text())/float(self.optical_slices)))
-                    chop_top = (self.optical_slices * (end_slice_number + 1) -1) - int(self.end_slice.text()) 
-
-                number_of_slices = end_slice_number - start_slice_number + 1
-
-                if self.crop:
-                    size_y = int(math.floor(
-                        volume_2_temp.shape[1]/self.crop_size_ratio_x))
-                    size_z = int(math.floor(
-                        volume_2_temp.shape[2]/self.crop_size_ratio_y))
-                    start_y = int(math.floor(
-                        volume_2_temp.shape[1]/self.crop_start_ratio_x))
-                    start_z = int(math.floor(
-                        volume_2_temp.shape[2]/self.crop_start_ratio_y))
-                else:
-                    size_y = int(math.floor(volume_2_temp.shape[1]))
-                    size_z = int(math.floor(volume_2_temp.shape[2]))
-                    start_y = 0
-                    start_z = 0
-
-                volume_2 = np.zeros((self.optical_slices*number_of_slices, size_y, size_z), dtype=np.float32)
-                volume_2[0::self.optical_slices, :, :] = volume_2_temp[start_slice_number:end_slice_number+1, start_y:start_y+size_y, start_z:start_z+size_z]
-
-                for optical_slice in range(1, self.optical_slices):
-                    volume_2_temp = (ds.sel(channel=2, type='mosaic', z=optical_slice).to_array(
-                    ).data * bscale + bzero).astype(dtype=np.float32)
-                    volume_2[optical_slice::self.optical_slices, :, :] = volume_2_temp[start_slice_number:end_slice_number+1, start_y:start_y+size_y, start_z:start_z+size_z]
-
-                # self.aligned_2 = volume_2
-                if self.cb_correct_brightness_optical_section.isChecked():
-                    print("correcting brightness of optical sections C2")
-                    self.Normalize_slices(volume_2, self.optical_slices)
-
-
-                print("aligning C2")
-                self.aligned_2 = self.Align(volume_2, resolution, output_resolution, start_slice_number*self.optical_slices)
-                #self.aligned_2 = volume_2
-                self.aligned_2 = self.aligned_2[chop_bottom:self.aligned_2.shape[0]-chop_top,:,:]
-                self.shape = self.aligned_2.shape
-                self.viewer.add_image([self.aligned_2], name='C2', scale=(float(self.slice_spacing)/float(self.optical_slices), output_resolution, output_resolution), blending='additive', colormap='red', contrast_limits=[0,30])#, translate=(0, int(start_y*output_resolution), int(start_z*output_resolution)))
-
-            if self.cb_C3.isChecked():
-                print("loading C3")
-
-                volume_3_temp = (ds.sel(channel=3, type='mosaic', z=0).to_array(
-                ).data * bscale + bzero).astype(dtype=np.float32)
-
-                if self.start_slice.text() == "":
-                    start_slice_number = 0
-                    chop_bottom = 0
-                else:
-                    start_slice_number = int(math.floor(float(self.start_slice.text())/float(self.optical_slices)))
-                    chop_bottom = int(self.start_slice.text()) - (self.optical_slices * start_slice_number) 
-                if self.end_slice.text() == "":
-                    end_slice_number = volume_3_temp.shape[0]-1
-                    chop_top = 0
-                else:
-                    end_slice_number = int(math.floor(float(self.end_slice.text())/float(self.optical_slices)))
-                    chop_top = (self.optical_slices * (end_slice_number + 1) -1) - int(self.end_slice.text())
-
-                number_of_slices = end_slice_number - start_slice_number + 1
-
-                if self.crop:
-                    size_y = int(math.floor(
-                        volume_3_temp.shape[1]/self.crop_size_ratio_x))
-                    size_z = int(math.floor(
-                        volume_3_temp.shape[2]/self.crop_size_ratio_y))
-                    start_y = int(math.floor(
-                        volume_3_temp.shape[1]/self.crop_start_ratio_x))
-                    start_z = int(math.floor(
-                        volume_3_temp.shape[2]/self.crop_start_ratio_y))
-                else:
-                    size_y = int(math.floor(volume_3_temp.shape[1]))
-                    size_z = int(math.floor(volume_3_temp.shape[2]))
-                    start_y = 0
-                    start_z = 0
-
-                volume_3 = np.zeros((self.optical_slices*number_of_slices, size_y, size_z), dtype=np.float32)
-                volume_3[0::self.optical_slices, :, :] = volume_3_temp[start_slice_number:end_slice_number+1, start_y:start_y+size_y, start_z:start_z+size_z]
-
-                for optical_slice in range(1, self.optical_slices):
-                    volume_3_temp = (ds.sel(channel=3, type='mosaic', z=optical_slice).to_array(
-                    ).data * bscale + bzero).astype(dtype=np.float32)
-                    volume_3[optical_slice::self.optical_slices, :, :] = volume_3_temp[start_slice_number:end_slice_number+1, start_y:start_y+size_y, start_z:start_z+size_z]
-
-                # self.aligned_3 = volume_3
-                if self.cb_correct_brightness_optical_section.isChecked():
-                    print("correcting brightness of optical sections C2")
-                    self.Normalize_slices(volume_3, self.optical_slices)
-
-                print("aligning C3")
-                self.aligned_3 = self.Align(volume_3, resolution, output_resolution, start_slice_number*self.optical_slices)
+            print("aligning C3")
+            if self.old_method:
+                self.aligned_3 = self.AlignNew(volume_3, resolution, output_resolution, start_slice_number*self.optical_slices)
+            else:
                 #self.aligned_3 = volume_3
-                self.aligned_3 = self.aligned_3[chop_bottom:self.aligned_3.shape[0]-chop_top,:,:]
-                self.shape = self.aligned_3.shape
-                self.viewer.add_image([self.aligned_3], name='C3', scale=(float(self.slice_spacing)/float(self.optical_slices), output_resolution, output_resolution), blending='additive', colormap='green', contrast_limits=[0,30])#, translate=(0, int(start_y*output_resolution), int(start_z*output_resolution)))
+                self.aligned_3 = self.AlignNew(volume_3, resolution, output_resolution, start_slice_number*self.optical_slices)
 
-            if self.cb_C4.isChecked():
-                print("loading C4")
+            self.aligned_3 = self.aligned_3[chop_bottom:self.aligned_3.shape[0]-chop_top,:,:]
+            self.shape = self.aligned_3.shape
+            # self.viewer.add_image([self.aligned_3], name='C3', scale=(float(self.slice_spacing)/float(self.optical_slices), output_resolution, output_resolution), blending='additive', colormap='green', contrast_limits=[0,30])#, translate=(0, int(start_y*output_resolution), int(start_z*output_resolution)))
+            self.viewer.add_image([self.aligned_3], name='C3', scale=(float(self.slice_spacing)/float(self.optical_slices) / output_resolution, 1, 1), blending='additive', colormap='green', contrast_limits=[0,30])#, translate=(0, int(start_y*output_resolution), int(start_z*output_resolution)))
 
-                volume_4_temp = (ds.sel(channel=4, type='mosaic', z=0).to_array(
+        if self.cb_C4.isChecked():
+            print("loading C4")
+
+            volume_4_temp = (ds.sel(channel=4, type='mosaic', z=0).to_array(
+            ).data * bscale + bzero).astype(dtype=np.float32)
+
+            if self.start_slice.text() == "":
+                start_slice_number = 0
+                chop_bottom = 0
+            else:
+                start_slice_number = int(math.floor(float(self.start_slice.text())/float(self.optical_slices)))
+                chop_bottom = int(self.start_slice.text()) - (self.optical_slices * start_slice_number) 
+            if self.end_slice.text() == "":
+                end_slice_number = volume_4_temp.shape[0]-1
+                chop_top = 0
+            else:
+                end_slice_number = int(math.floor(float(self.end_slice.text())/float(self.optical_slices)))
+                chop_top = (self.optical_slices * (end_slice_number + 1) -1) - int(self.end_slice.text())
+
+            number_of_slices = end_slice_number - start_slice_number + 1
+
+            #if self.crop:
+            #    size_y = int(math.floor(
+            #        volume_4_temp.shape[1]/self.crop_size_ratio_x))
+            #    size_z = int(math.floor(
+            #        volume_4_temp.shape[2]/self.crop_size_ratio_y))
+            #    start_y = int(math.floor(
+            #        volume_4_temp.shape[1]/self.crop_start_ratio_x))
+            #    start_z = int(math.floor(
+            #        volume_4_temp.shape[2]/self.crop_start_ratio_y))
+            if self.crop:
+                # spacing = (self.ds1['S001'].attrs['scale'])
+                spacing_x = resolution*0.1*self.spacing[0]
+                spacing_y = resolution*0.1*self.spacing[1]
+
+                size_y = int(math.floor((self.crop_end_x - self.crop_start_x) / spacing_x))
+                size_z = int(math.floor((self.crop_end_y - self.crop_start_y) / spacing_y))
+                start_y = int(math.floor(self.crop_start_x / spacing_x))
+                start_z = int(math.floor(self.crop_start_y / spacing_y))
+            else:
+                size_y = int(math.floor(volume_4_temp.shape[1]))
+                size_z = int(math.floor(volume_4_temp.shape[2]))
+                start_y = 0
+                start_z = 0
+
+            volume_4 = np.zeros((self.optical_slices*number_of_slices, size_y, size_z), dtype=np.float32)
+            volume_4[0::self.optical_slices, :, :] = volume_4_temp[start_slice_number:end_slice_number+1, start_y:start_y+size_y, start_z:start_z+size_z]
+
+            for optical_slice in range(1, self.optical_slices):
+                volume_4_temp = (ds.sel(channel=4, type='mosaic', z=optical_slice).to_array(
                 ).data * bscale + bzero).astype(dtype=np.float32)
+                volume_4[optical_slice::self.optical_slices, :, :] = volume_4_temp[start_slice_number:end_slice_number+1, start_y:start_y+size_y, start_z:start_z+size_z]
 
-                if self.start_slice.text() == "":
-                    start_slice_number = 0
-                    chop_bottom = 0
-                else:
-                    start_slice_number = int(math.floor(float(self.start_slice.text())/float(self.optical_slices)))
-                    chop_bottom = int(self.start_slice.text()) - (self.optical_slices * start_slice_number) 
-                if self.end_slice.text() == "":
-                    end_slice_number = volume_4_temp.shape[0]-1
-                    chop_top = 0
-                else:
-                    end_slice_number = int(math.floor(float(self.end_slice.text())/float(self.optical_slices)))
-                    chop_top = (self.optical_slices * (end_slice_number + 1) -1) - int(self.end_slice.text())
+            # self.aligned_4 = volume_4
+            if self.cb_correct_brightness_optical_section.isChecked():
+                print("correcting brightness of optical sections C2")
+                self.Normalize_slices(volume_4, self.optical_slices)
 
-                number_of_slices = end_slice_number - start_slice_number + 1
+            print("aligning C4")
+            if self.old_method:
+                self.aligned_4 = self.AlignNew(volume_4, resolution, output_resolution, start_slice_number*self.optical_slices)
+            else:
+                self.aligned_4 = self.AlignNew(volume_4, resolution, output_resolution, start_slice_number*self.optical_slices)
+                
+            self.aligned_4 = self.aligned_4[chop_bottom:self.aligned_4.shape[0]-chop_top,:,:]
+            self.shape = self.aligned_4.shape
+            # self.viewer.add_image([self.aligned_4], name='C4', scale=(float(self.slice_spacing)/float(self.optical_slices), output_resolution, output_resolution), blending='additive', colormap='bop blue', contrast_limits=[0,30])#, translate=(0, int(start_y*output_resolution), int(start_z*output_resolution)))
+            self.viewer.add_image([self.aligned_4], name='C4', scale=(float(self.slice_spacing)/float(self.optical_slices) / output_resolution, 1, 1), blending='additive', colormap='bop blue', contrast_limits=[0,30])#, translate=(0, int(start_y*output_resolution), int(start_z*output_resolution)))
 
-                if self.crop:
-                    size_y = int(math.floor(
-                        volume_4_temp.shape[1]/self.crop_size_ratio_x))
-                    size_z = int(math.floor(
-                        volume_4_temp.shape[2]/self.crop_size_ratio_y))
-                    start_y = int(math.floor(
-                        volume_4_temp.shape[1]/self.crop_start_ratio_x))
-                    start_z = int(math.floor(
-                        volume_4_temp.shape[2]/self.crop_start_ratio_y))
-                else:
-                    size_y = int(math.floor(volume_4_temp.shape[1]))
-                    size_z = int(math.floor(volume_4_temp.shape[2]))
-                    start_y = 0
-                    start_z = 0
+        spacing_loaded = [float(self.slice_spacing)/float(self.optical_slices), output_resolution, output_resolution]
 
-                volume_4 = np.zeros((self.optical_slices*number_of_slices, size_y, size_z), dtype=np.float32)
-                volume_4[0::self.optical_slices, :, :] = volume_4_temp[start_slice_number:end_slice_number+1, start_y:start_y+size_y, start_z:start_z+size_z]
-
-                for optical_slice in range(1, self.optical_slices):
-                    volume_4_temp = (ds.sel(channel=4, type='mosaic', z=optical_slice).to_array(
-                    ).data * bscale + bzero).astype(dtype=np.float32)
-                    volume_4[optical_slice::self.optical_slices, :, :] = volume_4_temp[start_slice_number:end_slice_number+1, start_y:start_y+size_y, start_z:start_z+size_z]
-
-                # self.aligned_4 = volume_4
-                if self.cb_correct_brightness_optical_section.isChecked():
-                    print("correcting brightness of optical sections C2")
-                    self.Normalize_slices(volume_4, self.optical_slices)
-
-                print("aligning C4")
-                self.aligned_4 = self.Align(volume_4, resolution, output_resolution, start_slice_number*self.optical_slices)
-                #self.aligned_4 = volume_4
-                self.aligned_4 = self.aligned_4[chop_bottom:self.aligned_4.shape[0]-chop_top,:,:]
-                self.shape = self.aligned_4.shape
-                self.viewer.add_image([self.aligned_4], name='C4', scale=(float(self.slice_spacing)/float(self.optical_slices), output_resolution, output_resolution), blending='additive', colormap='bop blue', contrast_limits=[0,30])#, translate=(0, int(start_y*output_resolution), int(start_z*output_resolution)))
-
+        self.MakeBoundingBox()
             # create naparimovie object
             #if self.movie is None:
                 #self.movie = Movie(myviewer=self.viewer)
                 #self.movie.inter_steps = 30
 
     def LoadInRegion(self, text):
+        
+        zoom = self.viewer.window.qt_viewer.camera.zoom
+        angles = self.viewer.window.qt_viewer.camera.angles
+        
+        if any(i.name == 'bounding box' for i in self.viewer.layers):
+            self.viewer.layers.remove('bounding box')
+        
+        if any(i.name == 'crop box' for i in self.viewer.layers):
+            self.viewer.layers.remove('crop box')
 
         print(self.viewer.layers['Shapes'].data)
         data_length = len(self.viewer.layers['Shapes'].data[0])
@@ -516,6 +696,27 @@ class NapariSTPT:
                 minY = self.viewer.layers['Shapes'].data[0][i][2]
             if maxY < self.viewer.layers['Shapes'].data[0][i][2]:
                 maxY = self.viewer.layers['Shapes'].data[0][i][2]
+
+        # output_resolution = float(self.pixel_size.text())
+        # minX = minX/output_resolution
+        # maxX = maxX/output_resolution
+        # minY = minY/output_resolution
+        # maxY = maxY/output_resolution
+        # print("crop to: {} {} {} {}".format(minX, maxX, minY, maxY))
+
+        # 
+        print("crop to: {} {} {} {}".format(minX, maxX, minY, maxY))
+        print("self.origin_x: {}".format(self.origin_x))
+        print("self.origin_y: {}".format(self.origin_y))
+        print("self.current_output_resolution: {}".format(self.current_output_resolution))
+        
+        self.crop_start_x = self.origin_x + (minX * self.current_output_resolution)
+        self.crop_start_y = self.origin_y + (minY * self.current_output_resolution)
+        self.crop_end_x = self.origin_x + (maxX * self.current_output_resolution)
+        self.crop_end_y = self.origin_y + (maxY * self.current_output_resolution)
+
+        self.origin_x = self.crop_start_x
+        self.origin_y = self.crop_start_y
 
         if self.aligned_1 is not None:
             self.crop_start_ratio_x = self.aligned_1.shape[1]/minX
@@ -539,11 +740,114 @@ class NapariSTPT:
             self.crop_size_ratio_y = self.aligned_4.shape[2]/(maxY-minY)
 
         self.viewer.layers.remove('Shapes')
+
+        # print(f"crop_start_ratio_x {self.crop_start_ratio_x}, crop_start_ratio_y {self.crop_start_ratio_y}, crop_size_ratio_x {self.crop_size_ratio_x}, crop_size_ratio_y {self.crop_size_ratio_y}")
+        print(f"crop_start_x {self.crop_start_x}, crop_start_y {self.crop_start_y}, crop_size_x {self.crop_end_x}, crop_size_y {self.crop_end_y}")
+
         # print("crop to: {} {} {} {}".format(minX, maxX, minY, maxY))
 
         self.crop = True
         self.Load(text)
         self.crop = False
+
+        # self.MakeBoundingBox()
+        
+        self.viewer.window.qt_viewer.camera.center = (self.shape[0]/2, self.shape[1]/2, self.shape[2]/2 )
+        self.viewer.window.qt_viewer.camera.angles = angles
+        self.viewer.window.qt_viewer.camera.zoom = zoom
+        # print("self.viewer.window.qt_viewer.camera.center")
+        # print(self.viewer.window.qt_viewer.camera.center)
+        # print("self.viewer.window.qt_viewer.camera.angles")
+        # print(self.viewer.window.qt_viewer.camera.angles)
+        # print("self.viewer.window.qt_viewer.camera.zoom")
+        # print(self.viewer.window.qt_viewer.camera.zoom)
+
+
+    def CropToRegion(self):
+        # print(self.viewer.window.qt_viewer.camera.angles)
+        # print(self.viewer.window.qt_viewer.camera.center)
+
+        if any(i.name == 'bounding box' for i in self.viewer.layers):
+            self.viewer.layers.remove('bounding box')
+        
+        if any(i.name == 'crop box' for i in self.viewer.layers):
+            self.viewer.layers.remove('crop box')
+
+        output_resolution = float(self.pixel_size.text())
+        #print(self.viewer.layers['Shapes'])
+        #print(self.viewer.layers['Shapes'].data)
+        #print(self.viewer.layers.selection[0])
+        data_length = len(self.viewer.layers['Shapes'].data[0])
+        print(data_length)
+        #data_length = len(self.viewer.layers['bounding box'].data[0])
+        #print(data_length)
+        minX = 100000000
+        maxX = 0
+        minY = 100000000
+        maxY = 0
+        for i in range(0, data_length):
+            print(self.viewer.layers['Shapes'].data[0][i])
+            if minX > self.viewer.layers['Shapes'].data[0][i][1]:
+                minX = self.viewer.layers['Shapes'].data[0][i][1]
+            if maxX < self.viewer.layers['Shapes'].data[0][i][1]:
+                maxX = self.viewer.layers['Shapes'].data[0][i][1]
+            if minY > self.viewer.layers['Shapes'].data[0][i][2]:
+                minY = self.viewer.layers['Shapes'].data[0][i][2]
+            if maxY < self.viewer.layers['Shapes'].data[0][i][2]:
+                maxY = self.viewer.layers['Shapes'].data[0][i][2]
+
+
+
+        self.origin_x = self.origin_x + (output_resolution * minX)
+        self.origin_y = self.origin_y + (output_resolution * minY)
+
+        #minX = minX/output_resolution
+        #maxX = maxX/output_resolution
+        #minY = minY/output_resolution
+        #maxY = maxY/output_resolution
+        print("crop to: {} {} {} {}".format(minX, maxX, minY, maxY))
+
+        if self.aligned_1 is not None and self.cb_C1.isChecked() and any(i.name == 'C1' for i in self.viewer.layers):
+            self.aligned_1 = self.aligned_1[:, int(
+                minX):int(maxX), int(minY):int(maxY)]
+            self.shape = self.aligned_1.shape
+            self.viewer.layers.remove('C1')
+            self.image_translation = (int(minX*output_resolution), int(minY*output_resolution))
+            self.viewer.add_image([self.aligned_1], name='C1', scale=(float(self.slice_spacing)/float(self.optical_slices) / output_resolution, 1, 1), blending='additive', colormap='bop purple', contrast_limits=[0,30])#, translate=(0, int(minX*output_resolution), int(minY*output_resolution)))
+        if self.aligned_2 is not None and self.cb_C2.isChecked() and any(i.name == 'C2' for i in self.viewer.layers):
+            self.aligned_2 = self.aligned_2[:, int(
+                minX):int(maxX), int(minY):int(maxY)]
+            self.shape = self.aligned_2.shape
+            self.viewer.layers.remove('C2')
+            self.image_translation = (int(minX*output_resolution), int(minY*output_resolution))
+            self.viewer.add_image([self.aligned_2], name='C2', scale=(float(self.slice_spacing)/float(self.optical_slices) / output_resolution, 1, 1), blending='additive', colormap='red', contrast_limits=[0,30])#, translate=(0, int(minX*output_resolution), int(minY*output_resolution)))
+        if self.aligned_3 is not None and self.cb_C3.isChecked() and any(i.name == 'C3' for i in self.viewer.layers):
+            self.aligned_3 = self.aligned_3[:, int(
+                minX):int(maxX), int(minY):int(maxY)]
+            self.shape = self.aligned_3.shape
+            self.viewer.layers.remove('C3')
+            self.image_translation = (int(minX*output_resolution), int(minY*output_resolution))
+            self.viewer.add_image([self.aligned_3], name='C3', scale=(float(self.slice_spacing)/float(self.optical_slices) / output_resolution, 1, 1), blending='additive', colormap='green', contrast_limits=[0,30])#, translate=(0, int(minX*output_resolution), int(minY*output_resolution)))
+        if self.aligned_4 is not None and self.cb_C4.isChecked() and any(i.name == 'C4' for i in self.viewer.layers):
+            self.aligned_4 = self.aligned_4[:, int(
+                minX):int(maxX), int(minY):int(maxY)]
+            self.shape = self.aligned_4.shape
+            self.viewer.layers.remove('C4')
+            self.image_translation = (int(minX*output_resolution), int(minY*output_resolution))
+            self.viewer.add_image([self.aligned_4], name='C4', scale=(float(self.slice_spacing)/float(self.optical_slices) / output_resolution, 1, 1), blending='additive', colormap='bop blue', contrast_limits=[0,30])#, translate=(0, int(minX*output_resolution), int(minY*output_resolution)))
+
+            
+        self.viewer.layers.remove('Shapes')
+        self.MakeBoundingBox()
+        
+
+        print(self.shape)
+        print(self.viewer.window.qt_viewer.camera.center)
+        self.viewer.window.qt_viewer.camera.center = (self.shape[0]/2, self.shape[1]/2, self.shape[2]/2 )
+        print(self.viewer.window.qt_viewer.camera.center)
+
+            
+
 
     def Load2D(self, text):
 
@@ -609,8 +913,8 @@ class NapariSTPT:
             im32 = (ds32[slice_name].sel(
                 channel=1, type='mosaic', z=0).data * bscale + bzero)
 
-            with napari.gui_qt():
-                self.viewer.add_image([im1, im2, im4, im8, im16, im32], multiscale=True,
+            #with napari.gui_qt():
+            self.viewer.add_image([im1, im2, im4, im8, im16, im32], multiscale=True,
                                       name='C1', blending='additive', colormap='bop purple', contrast_limits=[0,30])
 
         if self.cb_C2.isChecked():
@@ -627,8 +931,8 @@ class NapariSTPT:
             im32 = (ds32[slice_name].sel(
                 channel=2, type='mosaic', z=0).data * bscale + bzero)
 
-            with napari.gui_qt():
-                self.viewer.add_image([im1, im2, im4, im8, im16, im32], multiscale=True, 
+            #with napari.gui_qt():
+            self.viewer.add_image([im1, im2, im4, im8, im16, im32], multiscale=True, 
                                         name='C2', blending='additive', colormap='red', contrast_limits=[0,30])
                 
 
@@ -646,8 +950,8 @@ class NapariSTPT:
             im32 = (ds32[slice_name].sel(
                 channel=3, type='mosaic', z=0).data * bscale + bzero)
 
-            with napari.gui_qt():
-                self.viewer.add_image([im1, im2, im4, im8, im16, im32], multiscale=True,
+            #with napari.gui_qt():
+            self.viewer.add_image([im1, im2, im4, im8, im16, im32], multiscale=True,
                                       name='C3', blending='additive', colormap='green', contrast_limits=[0,30])
                 #self.viewer.add_image(im4, multiscale=False, name='C3', blending='additive', colormap='green')
 
@@ -665,17 +969,28 @@ class NapariSTPT:
             im32 = (ds32[slice_name].sel(
                 channel=4, type='mosaic', z=0).data * bscale + bzero)
 
-            with napari.gui_qt():
-                self.viewer.add_image([im1, im2, im4, im8, im16, im32], multiscale=True,
+            #with napari.gui_qt():
+            self.viewer.add_image([im1, im2, im4, im8, im16, im32], multiscale=True,
                                       name='C4', blending='additive', colormap='bop blue', contrast_limits=[0,30])
+
+
+
+    def Load3D(self, text):
+
+        self.origin_x = 0
+        self.origin_y = 0
+
+        self.crop = False
+        self.Load(text)
+
 
 
     def Align(self, volume, resolution, output_resolution, start_slice_number):
 
-        spacing = (self.ds1['S001'].attrs['scale'])
+        # spacing = (self.ds1['S001'].attrs['scale'])
         # size_multiplier = (resolution*0.1*spacing[0])/7.5
         # print(resolution*0.1*spacing[0])
-        size_multiplier = (resolution*0.1*spacing[0])/output_resolution
+        size_multiplier = (resolution*0.1*self.spacing[0])/output_resolution
         size = (volume.shape[0], int(size_multiplier*volume.shape[1]), int(size_multiplier*volume.shape[2]))
         aligned = np.zeros(size, dtype=np.float32)
         size2D = (int(size_multiplier*volume.shape[2]), int(size_multiplier*volume.shape[1]))
@@ -696,21 +1011,21 @@ class NapariSTPT:
             #    slice_name = 'S'+str(z+1)
             slice_name = self.slice_names[z+start_slice_number]
 
-            spacing = (self.ds1[slice_name].attrs['scale'])
+            current_spacing = (self.ds1[slice_name].attrs['scale'])
             # print(f"spacing {spacing}")
             # fixed.SetSpacing([1.6*spacing[0],1.6*spacing[1]])
-            fixed.SetSpacing([resolution*0.1*spacing[1],resolution*0.1*spacing[0]])
+            fixed.SetSpacing([resolution*0.1*current_spacing[1],resolution*0.1*current_spacing[0]])
 
             transform = sitk.Euler2DTransform()
 
             align_pos = z + start_slice_number #*self.optical_slices
             alignY = 0
             if not np.isnan(self.corrected_align_y[align_pos]):
-                alignY = -self.corrected_align_y[align_pos]*0.1*spacing[1]
+                alignY = -self.corrected_align_y[align_pos]*0.1*current_spacing[1]
 
             alignX = 0
             if not np.isnan(self.corrected_align_x[align_pos]):
-                alignX = -self.corrected_align_x[align_pos]*0.1*spacing[0]
+                alignX = -self.corrected_align_x[align_pos]*0.1*current_spacing[0]
 
             #print(f"alignX {alignX}")
             #print(f"align_pos {align_pos} alignY {self.corrected_align_y[align_pos]}")
@@ -741,26 +1056,90 @@ class NapariSTPT:
 
         return aligned.astype(dtype=np.float32)
 
-    def AlignNew(self, volume, resolution, output_resolution):
+
+    def AlignNew(self, volume, resolution, output_resolution, start_slice_number):
+
+        size_multiplier = (resolution*0.1*self.spacing[0])/output_resolution
+        size = (volume.shape[0], int(size_multiplier*volume.shape[1]), int(size_multiplier*volume.shape[2]))
+        aligned = np.zeros(size, dtype=np.float32)
+        size2D = (int(size_multiplier*volume.shape[2]), int(size_multiplier*volume.shape[1]))
+
+        z_size = volume.shape[0]
+        for z in range(0, z_size):
+
+            fixed = sitk.GetImageFromArray(volume[z, :, :])
+            fixed.SetOrigin((0, 0))
+
+
+            if self.old_method:
+                slice_name = self.slice_names[z+start_slice_number]
+                current_spacing = (self.ds1[slice_name].attrs['scale'])
+            else:
+                slice_name = f"S{(z+start_slice_number+1):03d}"
+                current_spacing = [0,0,0]
+                current_spacing[0] = 10 * float(json.loads(self.ds1[slice_name].attrs['scale'])["x"])
+                current_spacing[1] = 10 * float(json.loads(self.ds1[slice_name].attrs['scale'])["y"])
+                current_spacing[2] = 10 * float(json.loads(self.ds1[slice_name].attrs['scale'])["z"])
+
+                
+
+            fixed.SetSpacing([resolution*0.1*current_spacing[1],resolution*0.1*current_spacing[0]])
+
+            transform = sitk.Euler2DTransform()
+
+            
+            if self.old_method:
+                align_pos = z + start_slice_number
+                alignY = 0
+                if not np.isnan(self.corrected_align_y[align_pos]):
+                    alignY = -self.corrected_align_y[align_pos]*0.1*current_spacing[1]
+
+                alignX = 0
+                if not np.isnan(self.corrected_align_x[align_pos]):
+                    alignX = -self.corrected_align_x[align_pos]*0.1*current_spacing[0]
+
+                transform.SetTranslation([alignY, alignX])
+            else:
+                transform.SetTranslation([0, 0])
+
+            resampler = sitk.ResampleImageFilter()
+
+            resampler.SetSize(size2D)
+            resampler.SetOutputSpacing([output_resolution, output_resolution])
+            resampler.SetOutputOrigin((0, 0))
+            resampler.SetInterpolator(sitk.sitkLinear)
+            resampler.SetDefaultPixelValue(0)
+            resampler.SetTransform(transform)
+
+            out = resampler.Execute(fixed)
+
+            np_out = sitk.GetArrayFromImage(out)
+            aligned[z, :, :] = np_out
+
+        return aligned.astype(dtype=np.float32)
+
+
+
+    def AlignNewOld(self, volume, resolution, output_resolution):
         
-        if self.old_method:
-            spacing = (self.ds1['S001'].attrs['scale'])
-        else:
-            spacing = [float,float,float]
+        #if self.old_method:
+        #    spacing = (self.ds1['S001'].attrs['scale'])
+        #else:
+        #    spacing = [float,float,float]
             #print(self.ds1['S001'].attrs['scale'])
             #print(json.loads(self.ds1['S001'].attrs['scale']))
             #print(json.loads(self.ds1['S001'].attrs['scale'])["x"])
             #print(type(json.loads(self.ds1['S001'].attrs['scale'])["x"]))
-            spacing[0] = float(json.loads(self.ds1['S001'].attrs['scale'])["x"])
-            spacing[1] = float(json.loads(self.ds1['S001'].attrs['scale'])["y"])
-            spacing[2] = float(json.loads(self.ds1['S001'].attrs['scale'])["z"])
-            print(spacing[0])
-            print(spacing[1])
-            print(spacing[2])
+            #spacing[0] = float(json.loads(self.ds1['S001'].attrs['scale'])["x"])
+            #spacing[1] = float(json.loads(self.ds1['S001'].attrs['scale'])["y"])
+            #spacing[2] = float(json.loads(self.ds1['S001'].attrs['scale'])["z"])
+            #print(spacing[0])
+            #print(spacing[1])
+            #print(spacing[2])
 
         # size_multiplier = (resolution*0.1*spacing[0])/7.5
         # print(resolution*0.1*spacing[0])
-        size_multiplier = (resolution*spacing[0])/output_resolution
+        size_multiplier = (resolution*self.spacing[0])/output_resolution
         size = (volume.shape[0], int(size_multiplier*volume.shape[1]), int(size_multiplier*volume.shape[2]))
         aligned = np.zeros(size, dtype=np.float32)
         size2D = (int(size_multiplier*volume.shape[2]), int(size_multiplier*volume.shape[1]))
@@ -781,13 +1160,14 @@ class NapariSTPT:
             #    slice_name = 'S'+str(z+1)
             if self.old_method:
                 slice_name = self.slice_names[z-1]
-                print(slice_name)
+                #print(slice_name)
+                current_spacing = (self.ds1[slice_name].attrs['scale'])
             else:
                 slice_name = f"S{z:03d}"
-
-                spacing[0] = float(json.loads(self.ds1[slice_name].attrs['scale'])["x"])
-                spacing[1] = float(json.loads(self.ds1[slice_name].attrs['scale'])["y"])
-                spacing[2] = float(json.loads(self.ds1[slice_name].attrs['scale'])["z"])
+                current_spacing = []
+                current_spacing[0] = float(json.loads(self.ds1[slice_name].attrs['scale'])["x"])
+                current_spacing[1] = float(json.loads(self.ds1[slice_name].attrs['scale'])["y"])
+                current_spacing[2] = float(json.loads(self.ds1[slice_name].attrs['scale'])["z"])
 
             #print(spacing)
             #spacing = (self.ds1[slice_name].attrs['scale'])
@@ -796,24 +1176,26 @@ class NapariSTPT:
             #print(type(resolution))
             #print(type(spacing[1]))
             
-            fixed.SetSpacing([resolution*spacing[1],
-                             resolution*spacing[0]])
+            fixed.SetSpacing([resolution*current_spacing[1],
+                             resolution*current_spacing[0]])
 
             transform = sitk.Euler2DTransform()
 
             if self.old_method:
                 alignY = 0
                 if not np.isnan(self.align_y[z-1]):
-                    alignY = -self.align_y[z-1]*0.1*spacing[1]
+                    alignY = -self.align_y[z-1]*0.1*current_spacing[1]
 
                 alignX = 0
                 if not np.isnan(self.align_x[z-1]):
-                    alignX = -self.align_x[z-1]*0.1*spacing[0]
+                    alignX = -self.align_x[z-1]*0.1*current_spacing[0]
                 print(alignY)
             else:
-                alignX = self.ds1[slice_name].attrs['offsets']['x']*spacing[0]
-                alignY = self.ds1[slice_name].attrs['offsets']['y']*spacing[1]
+                alignX = self.ds1[slice_name].attrs['offsets']['x']*current_spacing[0]
+                alignY = self.ds1[slice_name].attrs['offsets']['y']*current_spacing[1]
                 print('{}/{}, offsets_x: {}, offsets_y: {}'.format(z, z_size, self.ds1[slice_name].attrs['offsets']['x'], self.ds1[slice_name].attrs['offsets']['y']))
+                
+                
                 # print('{}/{}, spacing[0]: {}, spacing[1]: {}'.format(z, z_size, spacing[0], spacing[1]))
                 
                 #alignX = 0
@@ -861,9 +1243,10 @@ class NapariSTPT:
 
                 threholded_z = threholded[z, :, :]
                 volume_z = self.aligned_1[z, :, :]
-
+                
                 nb_components, output, stats, centroids = cv2.connectedComponentsWithStats(
                     threholded_z, connectivity=4)
+                
                 sizes = stats[:, -1]
                 sizes_sorted = np.sort(sizes, axis=0)
 
@@ -923,7 +1306,7 @@ class NapariSTPT:
             #    self.viewer.add_image(regions, name='C2 regions', scale=(15,output_resolution,output_resolution), blending='additive', colormap='blue')
 
         if self.aligned_3 is not None and self.cb_C3.isChecked() and any(i.name == 'C3' for i in self.viewer.layers):
-
+            
             threholded = self.aligned_3 > threshold
             threholded = ndimage.binary_fill_holes(threholded)
             threholded = threholded.astype(np.uint8)
@@ -935,12 +1318,13 @@ class NapariSTPT:
 
                 threholded_z = threholded[z, :, :]
                 volume_z = self.aligned_3[z, :, :]
-
+                
                 nb_components, output, stats, centroids = cv2.connectedComponentsWithStats(
                     threholded_z, connectivity=4)
+                
                 sizes = stats[:, -1]
                 sizes_sorted = np.sort(sizes, axis=0)
-
+                
                 if use_size:
                     max_size = float(self.maxSizeN.text())
                 else:
@@ -948,7 +1332,7 @@ class NapariSTPT:
                 for i in range(1, nb_components):
                     if sizes[i] < max_size:
                         volume_z[output == i] = threshold
-
+                
                 self.aligned_3[z, :, :] = volume_z
 
             self.viewer.layers['C3'].visible = False
@@ -991,182 +1375,14 @@ class NapariSTPT:
         #    if self.cb_C2.isChecked():
         #        self.viewer.add_image([self.aligned_2], name='C2 processed', scale=(15,output_resolution,output_resolution), blending='additive', colormap='red')
 
+
+
     def Remove_Small_Regions(self):
         self.Remove_Regions(True)
 
     def Keep_n_Regions(self):
         self.Remove_Regions(False)
-
-    def Crop(self):
-
-        output_resolution = float(self.pixel_size.text())
-        threshold = float(self.thresholdN.text())
-
-        maxX_final = 0
-        minX_final = sys.maxsize
-        maxY_final = 0
-        minY_final = sys.maxsize
-        maxZ_final = 0
-        minZ_final = sys.maxsize
-
-        if self.aligned_1 is not None and self.cb_C1.isChecked() and any(i.name == 'C1' for i in self.viewer.layers):
-
-            tissue = self.aligned_1 > threshold
-            objs = ndimage.find_objects(tissue)
-            maxX = int(objs[0][0].stop)
-            minX = int(objs[0][0].start)
-            maxY = int(objs[0][1].stop)
-            minY = int(objs[0][1].start)
-            maxZ = int(objs[0][2].stop)
-            minZ = int(objs[0][2].start)
-
-            maxX_final = max(maxX_final, maxX)
-            minX_final = min(minX_final, minX)
-            maxY_final = max(maxY_final, maxY)
-            minY_final = min(minY_final, minY)
-            maxZ_final = max(maxZ_final, maxZ)
-            minZ_final = min(minZ_final, minZ)
-
-        if self.aligned_2 is not None and self.cb_C2.isChecked() and any(i.name == 'C2' for i in self.viewer.layers):
-
-            print(self.aligned_2.shape)
-
-            tissue = self.aligned_2 > threshold
-            objs = ndimage.find_objects(tissue)
-            maxX = int(objs[0][0].stop)
-            minX = int(objs[0][0].start)
-            maxY = int(objs[0][1].stop)
-            minY = int(objs[0][1].start)
-            maxZ = int(objs[0][2].stop)
-            minZ = int(objs[0][2].start)
-
-            maxX_final = max(maxX_final, maxX)
-            minX_final = min(minX_final, minX)
-            maxY_final = max(maxY_final, maxY)
-            minY_final = min(minY_final, minY)
-            maxZ_final = max(maxZ_final, maxZ)
-            minZ_final = min(minZ_final, minZ)
-
-        if self.aligned_3 is not None and self.cb_C3.isChecked() and any(i.name == 'C3' for i in self.viewer.layers):
-
-            tissue = self.aligned_3 > threshold
-            objs = ndimage.find_objects(tissue)
-            maxX = int(objs[0][0].stop)
-            minX = int(objs[0][0].start)
-            maxY = int(objs[0][1].stop)
-            minY = int(objs[0][1].start)
-            maxZ = int(objs[0][2].stop)
-            minZ = int(objs[0][2].start)
-
-            maxX_final = max(maxX_final, maxX)
-            minX_final = min(minX_final, minX)
-            maxY_final = max(maxY_final, maxY)
-            minY_final = min(minY_final, minY)
-            maxZ_final = max(maxZ_final, maxZ)
-            minZ_final = min(minZ_final, minZ)
-
-        if self.aligned_4 is not None and self.cb_C4.isChecked() and any(i.name == 'C4' for i in self.viewer.layers):
-
-            tissue = self.aligned_4 > threshold
-            objs = ndimage.find_objects(tissue)
-            maxX = int(objs[0][0].stop)
-            minX = int(objs[0][0].start)
-            maxY = int(objs[0][1].stop)
-            minY = int(objs[0][1].start)
-            maxZ = int(objs[0][2].stop)
-            minZ = int(objs[0][2].start)
-
-            maxX_final = max(maxX_final, maxX)
-            minX_final = min(minX_final, minX)
-            maxY_final = max(maxY_final, maxY)
-            minY_final = min(minY_final, minY)
-            maxZ_final = max(maxZ_final, maxZ)
-            minZ_final = min(minZ_final, minZ)
-
-        print("cropping to {}-{},{}-{}".format(minX_final,
-              maxX_final, minY_final, maxY_final))
-
-        if self.aligned_1 is not None and self.cb_C1.isChecked() and any(i.name == 'C1' for i in self.viewer.layers):
-            self.aligned_1 = self.aligned_1[minX_final:maxX_final,
-                                            minY_final:maxY_final, minZ_final:maxZ_final]
-            self.viewer.layers.remove('C1')
-            self.viewer.add_image([self.aligned_1], name='C1', scale=(
-                15, output_resolution, output_resolution), blending='additive', colormap='bop purple', contrast_limits=[0,30])
-        if self.aligned_2 is not None and self.cb_C2.isChecked() and any(i.name == 'C2' for i in self.viewer.layers):
-            self.aligned_2 = self.aligned_2[minX_final:maxX_final,
-                                            minY_final:maxY_final, minZ_final:maxZ_final]
-            self.viewer.layers.remove('C2')
-            self.viewer.add_image([self.aligned_2], name='C2', scale=(
-                15, output_resolution, output_resolution), blending='additive', colormap='red', contrast_limits=[0,30])
-        if self.aligned_3 is not None and self.cb_C3.isChecked() and any(i.name == 'C3' for i in self.viewer.layers):
-            self.aligned_3 = self.aligned_3[minX_final:maxX_final,
-                                            minY_final:maxY_final, minZ_final:maxZ_final]
-            self.viewer.layers.remove('C3')
-            self.viewer.add_image([self.aligned_3], name='C3', scale=(
-                15, output_resolution, output_resolution), blending='additive', colormap='green', contrast_limits=[0,30])
-        if self.aligned_4 is not None and self.cb_C4.isChecked() and any(i.name == 'C4' for i in self.viewer.layers):
-            self.aligned_4 = self.aligned_4[minX_final:maxX_final,
-                                            minY_final:maxY_final, minZ_final:maxZ_final]
-            self.viewer.layers.remove('C4')
-            self.viewer.add_image([self.aligned_4], name='C4', scale=(
-                15, output_resolution, output_resolution), blending='additive', colormap='bop blue', contrast_limits=[0,30])
-
-        self.viewer.layers.remove('Shapes')
-        
-    def CropToRegion(self):
-
-        output_resolution = float(self.pixel_size.text())
-        #print(self.viewer.layers['Shapes'])
-        #print(self.viewer.layers['Shapes'].data)
-        #print(self.viewer.layers.selection[0])
-        data_length = len(self.viewer.layers['Shapes'].data[0])
-        print(data_length)
-        minX = 100000000
-        maxX = 0
-        minY = 100000000
-        maxY = 0
-        for i in range(0, data_length):
-            print(self.viewer.layers['Shapes'].data[0][i])
-            if minX > self.viewer.layers['Shapes'].data[0][i][1]:
-                minX = self.viewer.layers['Shapes'].data[0][i][1]
-            if maxX < self.viewer.layers['Shapes'].data[0][i][1]:
-                maxX = self.viewer.layers['Shapes'].data[0][i][1]
-            if minY > self.viewer.layers['Shapes'].data[0][i][2]:
-                minY = self.viewer.layers['Shapes'].data[0][i][2]
-            if maxY < self.viewer.layers['Shapes'].data[0][i][2]:
-                maxY = self.viewer.layers['Shapes'].data[0][i][2]
-
-        print("crop to: {} {} {} {}".format(minX, maxX, minY, maxY))
-
-        if self.aligned_1 is not None and self.cb_C1.isChecked() and any(i.name == 'C1' for i in self.viewer.layers):
-            self.aligned_1 = self.aligned_1[:, int(
-                minX):int(maxX), int(minY):int(maxY)]
-            self.viewer.layers.remove('C1')
-            self.image_translation = (int(minX*output_resolution), int(minY*output_resolution))
-            self.viewer.add_image([self.aligned_1], name='C1', scale=(float(self.slice_spacing)/float(self.optical_slices), output_resolution, output_resolution), blending='additive', colormap='bop purple')#, translate=(0, int(minX*output_resolution), int(minY*output_resolution)))
-        if self.aligned_2 is not None and self.cb_C2.isChecked() and any(i.name == 'C2' for i in self.viewer.layers):
-            self.aligned_2 = self.aligned_2[:, int(
-                minX):int(maxX), int(minY):int(maxY)]
-            self.viewer.layers.remove('C2')
-            self.image_translation = (int(minX*output_resolution), int(minY*output_resolution))
-            self.viewer.add_image([self.aligned_2], name='C2', scale=(float(self.slice_spacing)/float(self.optical_slices), output_resolution, output_resolution), blending='additive', colormap='red')#, translate=(0, int(minX*output_resolution), int(minY*output_resolution)))
-        if self.aligned_3 is not None and self.cb_C3.isChecked() and any(i.name == 'C3' for i in self.viewer.layers):
-            self.aligned_3 = self.aligned_3[:, int(
-                minX):int(maxX), int(minY):int(maxY)]
-            self.viewer.layers.remove('C3')
-            self.image_translation = (int(minX*output_resolution), int(minY*output_resolution))
-            self.viewer.add_image([self.aligned_3], name='C3', scale=(float(self.slice_spacing)/float(self.optical_slices), output_resolution, output_resolution), blending='additive', colormap='green')#, translate=(0, int(minX*output_resolution), int(minY*output_resolution)))
-        if self.aligned_4 is not None and self.cb_C4.isChecked() and any(i.name == 'C4' for i in self.viewer.layers):
-            self.aligned_4 = self.aligned_4[:, int(
-                minX):int(maxX), int(minY):int(maxY)]
-            self.viewer.layers.remove('C4')
-            self.image_translation = (int(minX*output_resolution), int(minY*output_resolution))
-            self.viewer.add_image([self.aligned_4], name='C4', scale=(float(self.slice_spacing)/float(self.optical_slices), output_resolution, output_resolution), blending='additive', colormap='bop blue')#, translate=(0, int(minX*output_resolution), int(minY*output_resolution)))
-            
-            
-        self.viewer.layers.remove('Shapes')
-
-                
+    
     def add_polygon_simple(self):
 
         pos = int(self.viewer.cursor.position[0]/15)
@@ -1192,11 +1408,11 @@ class NapariSTPT:
 
         #print("pos {}".format(self.viewer.dims.point[0]))
 
-
+        output_resolution = float(self.pixel_size.text())
         
 
         #pos = float(self.viewer.cursor.position[0]/(float(self.slice_spacing)/float(self.optical_slices)))
-        pos = self.viewer.dims.point[0] / (float(self.slice_spacing)/float(self.optical_slices))
+        pos = self.viewer.dims.point[0] / ((float(self.slice_spacing)/float(self.optical_slices)) / output_resolution)
         print("pos {}".format(pos))
         
         data_length = len(self.viewer.layers['Shapes'].data[0])
@@ -1235,6 +1451,12 @@ class NapariSTPT:
                 y = float(contour_list_sorted[0][1][i][1])
                 z = float(contour_list_sorted[0][1][i][2])
 
+                # 
+                # y = y/output_resolution
+                # z = z/output_resolution
+
+                print(f"x {x}, y {y}, z {z}")
+
                 new_shape.append((x,y,z))
 
         elif pos > contour_list_sorted[len(contour_list_sorted)-1][0]:
@@ -1242,6 +1464,13 @@ class NapariSTPT:
                 x = pos
                 y = float(contour_list_sorted[len(contour_list_sorted)-1][1][i][1])
                 z = float(contour_list_sorted[len(contour_list_sorted)-1][1][i][2])
+
+                
+                # output_resolution = float(self.pixel_size.text())
+                # y = y/output_resolution
+                # z = z/output_resolution
+
+                print(f"x {x}, y {y}, z {z}")
 
                 new_shape.append((x,y,z))
             
@@ -1273,7 +1502,7 @@ class NapariSTPT:
 
         new_shape = np.array(new_shape)
         output_resolution = float(self.pixel_size.text())
-        shapes_layer = self.viewer.add_shapes(new_shape, shape_type='polygon', name = "Shapes", scale=(float(self.slice_spacing)/float(self.optical_slices), output_resolution, output_resolution),)
+        shapes_layer = self.viewer.add_shapes(new_shape, shape_type='polygon', name = "Shapes", scale=(float(self.slice_spacing)/float(self.optical_slices) / output_resolution, 1, 1),)
     
 
 
@@ -1306,6 +1535,7 @@ class NapariSTPT:
                 z_pos = self.viewer.layers[layer_name].data[0][0][0] # z pos
                 contour = self.viewer.layers[layer_name].data[0]
                 contour_list.append((z_pos,contour))
+                self.viewer.layers[layer_name].visible = False
                 i = i+1
             except:
                 break
@@ -1380,20 +1610,24 @@ class NapariSTPT:
                 aligned4_tmp[z_level,:,:] = aligned4_tmp[z_level,:,:] * mask
 
         
-        #self.viewer.layers.remove('C3')
            
 
-
         if self.aligned_1 is not None:
-            self.viewer.add_image([aligned1_tmp], name='C1_masked', scale=(15, output_resolution, output_resolution), blending='additive', colormap='bop purple', translate=(0, 0, 0))
+            self.viewer.add_image([aligned1_tmp], name='C1_masked', scale=(float(self.slice_spacing)/float(self.optical_slices) / output_resolution, 1, 1), blending='additive', colormap='bop purple', contrast_limits=[0,30])
         if self.aligned_2 is not None:
-            self.viewer.add_image([aligned2_tmp], name='C2_masked', scale=(15, output_resolution, output_resolution), blending='additive', colormap='red', translate=(0, 0, 0))
+            self.viewer.add_image([aligned2_tmp], name='C2_masked', scale=(float(self.slice_spacing)/float(self.optical_slices) / output_resolution, 1, 1), blending='additive', colormap='red', contrast_limits=[0,30])
         if self.aligned_3 is not None:
-            self.viewer.add_image([aligned3_tmp], name='C3_masked', scale=(15, output_resolution, output_resolution), blending='additive', colormap='green', translate=(0, 0, 0))
+            self.viewer.add_image([aligned3_tmp], name='C3_masked', scale=(float(self.slice_spacing)/float(self.optical_slices) / output_resolution, 1, 1), blending='additive', colormap='green', contrast_limits=[0,30])
         if self.aligned_4 is not None:
-            self.viewer.add_image([aligned4_tmp], name='C4_masked', scale=(15, output_resolution, output_resolution), blending='additive', colormap='bop blue', translate=(0, 0, 0))
+            self.viewer.add_image([aligned4_tmp], name='C4_masked', scale=(float(self.slice_spacing)/float(self.optical_slices) / output_resolution, 1, 1), blending='additive', colormap='bop blue', contrast_limits=[0,30])
 
+        self.viewer.layers['C1'].visible = False
+        self.viewer.layers['C2'].visible = False
+        self.viewer.layers['C3'].visible = False
+        self.viewer.layers['C4'].visible = False
+        self.viewer.layers['Shapes'].visible = False
 
+        #self.viewer.layers.remove('C3')
         #self.viewer.layers.remove('Shapes')
 
 
@@ -1417,11 +1651,25 @@ class NapariSTPT:
     def on_combobox_changed(self):
         if os.path.exists(self.search_folder.text() + str(self.comboBoxPath.currentText())+'/mos.zarr/.zmetadata'):
             print("metadata is available")
-            ds = xr.open_zarr(self.search_folder.text(
-            ) + str(self.comboBoxPath.currentText())+'/mos.zarr', consolidated=True)
-            # print(ds.attrs["cube_reg"]['slice'])
-            length = len(ds.attrs["multiscale"]['datasets'])
             
+            try:
+                ds = xr.open_zarr(self.search_folder.text(
+                    ) + str(self.comboBoxPath.currentText())+'/mos.zarr', consolidated=True)
+                print("")
+                print("")
+                print(ds.attrs['sections'])
+                print("")
+                print("")
+                length = int(ds.attrs['sections'])
+
+                self.scroll.setValue(0)
+                self.image_slice.setText("0")
+                self.slice_names = ds.attrs['cube_reg']['slice']
+                self.scroll.setRange(0, len(self.slice_names))
+                print(f"number of slices: {len(self.slice_names)}")
+            except Exception:
+                print("none-consolidated")
+                pass
             #self.comboBoxResolution.clear()
             #for n in range(0, length):
             #    print("adding resolution {}".format(
@@ -1430,16 +1678,9 @@ class NapariSTPT:
             #        str(ds.attrs["multiscale"]['datasets'][n]['level']))
             #    self.comboBoxResolution.setCurrentText(
             #        str(ds.attrs["multiscale"]['datasets'][n]['level']))
-            try:
-                self.scroll.setValue(0)
-                self.image_slice.setText("0")
-                self.slice_names = ds.attrs['cube_reg']['slice']
-                self.scroll.setRange(0, len(self.slice_names))
-            except Exception:
-                # print("not initialised")
-                pass
+            
         else:
-            print("adding default resolution")
+            print("not changing number of slices")
             #self.comboBoxResolution.clear()
             #self.comboBoxResolution.addItem(str(1))
             #self.comboBoxResolution.addItem(str(2))
@@ -1798,9 +2039,9 @@ class NapariSTPT:
             self.aligned_1[3::10,:,:] = self.aligned_1[3::10,:,:] * norm_value
             self.aligned_1[4::10,:,:] = self.aligned_1[4::10,:,:] * norm_value
 
-            with napari.gui_qt():
-                self.viewer.layers.remove('C1')
-                self.viewer.add_image([self.aligned_1], name='C1', scale=(float(self.slice_spacing)/float(self.optical_slices), output_resolution, output_resolution), blending='additive', colormap='bop purple', contrast_limits=[0,30])#, translate=(0, int(start_y*output_resolution), int(start_z*output_resolution)))
+            # with napari.gui_qt():
+            self.viewer.layers.remove('C1')
+            self.viewer.add_image([self.aligned_1], name='C1', scale=(float(self.slice_spacing)/float(self.optical_slices), output_resolution, output_resolution), blending='additive', colormap='bop purple', contrast_limits=[0,30])#, translate=(0, int(start_y*output_resolution), int(start_z*output_resolution)))
 
 
         if self.cb_C2.isChecked():  
@@ -1810,9 +2051,9 @@ class NapariSTPT:
             self.aligned_2[3::10,:,:] = self.aligned_2[3::10,:,:] * norm_value
             self.aligned_2[4::10,:,:] = self.aligned_2[4::10,:,:] * norm_value
 
-            with napari.gui_qt():
-                self.viewer.layers.remove('C2')
-                self.viewer.add_image([self.aligned_2], name='C2', scale=(float(self.slice_spacing)/float(self.optical_slices), output_resolution, output_resolution), blending='additive', colormap='red', contrast_limits=[0,30])#, translate=(0, int(start_y*output_resolution), int(start_z*output_resolution)))
+            # with napari.gui_qt():
+            self.viewer.layers.remove('C2')
+            self.viewer.add_image([self.aligned_2], name='C2', scale=(float(self.slice_spacing)/float(self.optical_slices), output_resolution, output_resolution), blending='additive', colormap='red', contrast_limits=[0,30])#, translate=(0, int(start_y*output_resolution), int(start_z*output_resolution)))
 
         if self.cb_C3.isChecked():
 
@@ -1836,9 +2077,9 @@ class NapariSTPT:
 
                     self.aligned_3[i,:,:] = self.aligned_3[i,:,:] * slope + intercept
 
-            with napari.gui_qt():
-                self.viewer.layers.remove('C3')
-                self.viewer.add_image([self.aligned_3], name='C3', scale=(float(self.slice_spacing)/float(self.optical_slices), output_resolution, output_resolution), blending='additive', colormap='green', contrast_limits=[0,30])#, translate=(0, int(start_y*output_resolution), int(start_z*output_resolution)))
+            #with napari.gui_qt():
+            self.viewer.layers.remove('C3')
+            self.viewer.add_image([self.aligned_3], name='C3', scale=(float(self.slice_spacing)/float(self.optical_slices), output_resolution, output_resolution), blending='additive', colormap='green', contrast_limits=[0,30])#, translate=(0, int(start_y*output_resolution), int(start_z*output_resolution)))
 
         if self.cb_C4.isChecked():
             self.aligned_4[0::10,:,:] = self.aligned_4[0::10,:,:] * norm_value
@@ -1847,291 +2088,349 @@ class NapariSTPT:
             self.aligned_4[3::10,:,:] = self.aligned_4[3::10,:,:] * norm_value
             self.aligned_4[4::10,:,:] = self.aligned_4[4::10,:,:] * norm_value
 
-            with napari.gui_qt():
-                self.viewer.layers.remove('C4')
-                self.viewer.add_image([self.aligned_4], name='C4', scale=(float(self.slice_spacing)/float(self.optical_slices), output_resolution, output_resolution), blending='additive', colormap='bop blue', contrast_limits=[0,30])#, translate=(0, int(start_y*output_resolution), int(start_z*output_resolution)))
+            #with napari.gui_qt():
+            self.viewer.layers.remove('C4')
+            self.viewer.add_image([self.aligned_4], name='C4', scale=(float(self.slice_spacing)/float(self.optical_slices), output_resolution, output_resolution), blending='additive', colormap='bop blue', contrast_limits=[0,30])#, translate=(0, int(start_y*output_resolution), int(start_z*output_resolution)))
 
-            
+    def MethodChanged(self):
+
+        if self.cb_R_Old.isChecked():
+            self.old_method = True
+        else:
+            self.old_method = False
+ 
+        print(sys.platform)
+        if sys.platform == 'linux':
+            if self.old_method:
+                self.search_folder = QtWidgets.QLineEdit('/data/meds1_c/storage/processed/stpt')
+            else:
+                self.search_folder = QtWidgets.QLineEdit('/storage/processed/stpt')
+        else:
+            self.search_folder = QtWidgets.QLineEdit('N:/stpt/')
+
+        self.comboBoxPath.clear()
+        if os.path.exists(self.search_folder.text()):
+            for f in os.scandir(self.search_folder.text()):
+                if f.is_dir():
+                    if os.path.exists(f.path + "/mos.zarr"):
+                        s = f.path
+                        s = s.replace(self.search_folder.text(), '')
+                        print(s)
+                        # print(type(s))
+                        # text_file.write(s)
+                        # text_file.write('\n')
+                        self.comboBoxPath.addItem(s)
 
     def main(self):
 
-        with napari.gui_qt():
+        # with napari.gui_qt():
 
-            self.viewer = napari.Viewer()
+        self.viewer = napari.Viewer()
 
-            widget = QtWidgets.QWidget()
-            vbox = QtWidgets.QVBoxLayout()
+        widget = QtWidgets.QWidget()
+        vbox = QtWidgets.QVBoxLayout()
 
-            hbox = QtWidgets.QHBoxLayout()
-            hbox.addWidget(QtWidgets.QLabel("Data folder:"))
-            
-            print(sys.platform)
-            if sys.platform == 'linux':
-                if self.old_method:
-                    self.search_folder = QtWidgets.QLineEdit('/data/meds1_c/storage/processed/stpt')
-                else:
-                    self.search_folder = QtWidgets.QLineEdit('/data/meds1_a/eglez/stpt_out')
+        
+        hbox = QtWidgets.QHBoxLayout()
+        hbox.addStretch(1)
+        self.cb_R_Old = QtWidgets.QRadioButton('Old method')
+        self.cb_R_Old.setChecked(False)
+        hbox.addWidget(self.cb_R_Old)
+        self.cb_R_New = QtWidgets.QRadioButton('New method')
+        self.cb_R_New.setChecked(True)
+        self.cb_R_New.toggled.connect(self.MethodChanged)
+        hbox.addWidget(self.cb_R_New)
+        hbox.addStretch(1)
+        vbox.addLayout(hbox)
+        vbox.addLayout(hbox)
+
+
+        vbox.addLayout(hbox)
+
+        hbox = QtWidgets.QHBoxLayout()
+        hbox.addWidget(QtWidgets.QLabel("Data folder:"))
+        
+        print(sys.platform)
+        if sys.platform == 'linux':
+            if self.old_method:
+                self.search_folder = QtWidgets.QLineEdit('/data/meds1_c/storage/processed/stpt')
             else:
-                self.search_folder = QtWidgets.QLineEdit('N:/stpt/')
-            
-            self.search_folder.setMaximumWidth(250)
-            hbox.addWidget(self.search_folder)
-            bSelectFolder = QtWidgets.QPushButton('Set folder')
-            bSelectFolder.setCheckable(True)
-            bSelectFolder.clicked.connect(self.SelectFolder)
-            hbox.addWidget(bSelectFolder)
-            vbox.addLayout(hbox)
+                self.search_folder = QtWidgets.QLineEdit('/storage/processed/stpt')
+                #self.search_folder = QtWidgets.QLineEdit('/data/meds1_a/eglez/stpt_out')
+        else:
+            self.search_folder = QtWidgets.QLineEdit('N:/stpt/')
+        
+        self.search_folder.setMaximumWidth(250)
+        hbox.addWidget(self.search_folder)
+        bSelectFolder = QtWidgets.QPushButton('Set folder')
+        bSelectFolder.setCheckable(True)
+        bSelectFolder.clicked.connect(self.SelectFolder)
+        hbox.addWidget(bSelectFolder)
+        vbox.addLayout(hbox)
 
-            hbox = QtWidgets.QHBoxLayout()
-            self.comboBoxPath = QtWidgets.QComboBox()
+        hbox = QtWidgets.QHBoxLayout()
+        self.comboBoxPath = QtWidgets.QComboBox()
 
-            #text_file = open("sample.txt", "wt")
+        #text_file = open("sample.txt", "wt")
 
-            self.comboBoxPath.clear()
-            if os.path.exists(self.search_folder.text()):
-                for f in os.scandir(self.search_folder.text()):
-                    if f.is_dir():
-                        if os.path.exists(f.path + "/mos.zarr"):
-                            s = f.path
-                            s = s.replace(self.search_folder.text(), '')
-                            print(s)
-                            # print(type(s))
-                            # text_file.write(s)
-                            # text_file.write('\n')
-                            self.comboBoxPath.addItem(s)
+        self.comboBoxPath.clear()
+        if os.path.exists(self.search_folder.text()):
+            for f in os.scandir(self.search_folder.text()):
+                if f.is_dir():
+                    if os.path.exists(f.path + "/mos.zarr"):
+                        s = f.path
+                        s = s.replace(self.search_folder.text(), '')
+                        print(s)
+                        # print(type(s))
+                        # text_file.write(s)
+                        # text_file.write('\n')
+                        self.comboBoxPath.addItem(s)
 
-            # text_file.close()
+        # text_file.close()
 
-            self.comboBoxPath.setMaximumWidth(300)
-            self.comboBoxPath.currentIndexChanged.connect(
-                self.on_combobox_changed)
-            hbox.addWidget(self.comboBoxPath)
-            hbox.addStretch(1)
-            vbox.addLayout(hbox)
+        self.comboBoxPath.setMaximumWidth(300)
+        self.comboBoxPath.currentIndexChanged.connect(
+            self.on_combobox_changed)
+        hbox.addWidget(self.comboBoxPath)
+        hbox.addStretch(1)
+        vbox.addLayout(hbox)
 
-            hbox = QtWidgets.QHBoxLayout()
-            #hbox.addWidget(QtWidgets.QLabel("Load level:"))
-            #self.comboBoxResolution = QtWidgets.QComboBox()
-            #self.comboBoxResolution.setMaximumWidth(100)
-            #self.on_combobox_changed()
-            #hbox.addWidget(self.comboBoxResolution)
-            #hbox.addStretch(1)
+        hbox = QtWidgets.QHBoxLayout()
+        #hbox.addWidget(QtWidgets.QLabel("Load level:"))
+        #self.comboBoxResolution = QtWidgets.QComboBox()
+        #self.comboBoxResolution.setMaximumWidth(100)
+        #self.on_combobox_changed()
+        #hbox.addWidget(self.comboBoxResolution)
+        #hbox.addStretch(1)
 
-            hbox.addWidget(QtWidgets.QLabel("Slice spacing:"))
-            self.m_slice_spacing = QtWidgets.QLineEdit("15")
-            self.m_slice_spacing.setMaximumWidth(50)
-            hbox.addWidget(self.m_slice_spacing)
+        hbox.addWidget(QtWidgets.QLabel("Slice spacing:"))
+        self.m_slice_spacing = QtWidgets.QLineEdit("15")
+        self.m_slice_spacing.setMaximumWidth(50)
+        hbox.addWidget(self.m_slice_spacing)
 
-            hbox.addWidget(QtWidgets.QLabel("Output pixel size:"))
-            self.pixel_size = QtWidgets.QLineEdit("15")
-            self.pixel_size.setMaximumWidth(50)
-            hbox.addWidget(self.pixel_size)
-            hbox.addStretch(1)
-            vbox.addLayout(hbox)
-
-
-            hbox = QtWidgets.QHBoxLayout()
-            self.cb_correct_brightness_optical_section = QtWidgets.QCheckBox('Normalize brightness optical sections')
-            self.cb_correct_brightness_optical_section.setChecked(True)
-            hbox.addWidget(self.cb_correct_brightness_optical_section)
-            hbox.addStretch(1)
-            vbox.addLayout(hbox)
-            
-
-            hbox = QtWidgets.QHBoxLayout()
-            hbox.addWidget(QtWidgets.QLabel(
-                "Slices range:"))
-            self.start_slice = QtWidgets.QLineEdit("")
-            self.start_slice.setMaximumWidth(50)
-            hbox.addWidget(self.start_slice)
-            hbox.addWidget(QtWidgets.QLabel(
-                "to"))
-            self.end_slice = QtWidgets.QLineEdit("")
-            self.end_slice.setMaximumWidth(50)
-            hbox.addWidget(self.end_slice)
-            hbox.addStretch(1)
-            vbox.addLayout(hbox)
-
-            # hbox = QtWidgets.QHBoxLayout()
-            # hbox.addWidget(QtWidgets.QLabel(
-            #     "Maximum number of optical slices:"))
-            # self.nr_optical_slices = QtWidgets.QLineEdit("1")
-            # self.nr_optical_slices.setMaximumWidth(50)
-            # hbox.addWidget(self.nr_optical_slices)
-            # hbox.addStretch(1)
-            # vbox.addLayout(hbox)
-
-            hbox = QtWidgets.QHBoxLayout()
-            hbox.addWidget(QtWidgets.QLabel("Load channels:"))
-            self.cb_C1 = QtWidgets.QCheckBox('1')
-            self.cb_C1.setChecked(True)
-            hbox.addWidget(self.cb_C1)
-            self.cb_C2 = QtWidgets.QCheckBox('2')
-            self.cb_C2.setChecked(True)
-            hbox.addWidget(self.cb_C2)
-            self.cb_C3 = QtWidgets.QCheckBox('3')
-            self.cb_C3.setChecked(True)
-            hbox.addWidget(self.cb_C3)
-            self.cb_C4 = QtWidgets.QCheckBox('4')
-            self.cb_C4.setChecked(True)
-            hbox.addWidget(self.cb_C4)
-            hbox.addStretch(1)
-            vbox.addLayout(hbox)
-
-            hbox = QtWidgets.QHBoxLayout()
-            bLoad3D = QtWidgets.QPushButton('Load volume')
-            bLoad3D.setCheckable(True)
-            bLoad3D.clicked.connect(self.Load)
-            hbox.addWidget(bLoad3D)
-            # hbox.addStretch(1)
-            # vbox.addLayout(hbox)
-
-            # hbox = QtWidgets.QHBoxLayout()
-            bLoad3D = QtWidgets.QPushButton('Reload in shape')
-            bLoad3D.setCheckable(True)
-            bLoad3D.clicked.connect(self.LoadInRegion)
-            hbox.addWidget(bLoad3D)
-            bCrop = QtWidgets.QPushButton('Crop to shape')
-            bCrop.setCheckable(True)
-            bCrop.clicked.connect(self.CropToRegion)
-            hbox.addWidget(bCrop)
-            hbox.addStretch(1)
-            vbox.addLayout(hbox)
-
-            hbox = QtWidgets.QHBoxLayout()
-            hbox.addWidget(QtWidgets.QLabel("Tissue threshold value:"))
-            self.thresholdN = QtWidgets.QLineEdit("0.3")
-            hbox.addWidget(self.thresholdN)
-            hbox.addStretch(1)
-            vbox.addLayout(hbox)
-
-            hbox = QtWidgets.QHBoxLayout()
-            hbox.addWidget(QtWidgets.QLabel("Number of regions to retain:"))
-            self.spinN = QtWidgets.QSpinBox()
-            self.spinN.setValue(1)
-            hbox.addWidget(self.spinN)
-            hbox.addStretch(1)
-            vbox.addLayout(hbox)
-
-            hbox = QtWidgets.QHBoxLayout()
-            hbox.addWidget(QtWidgets.QLabel("Minimal size:"))
-            self.maxSizeN = QtWidgets.QLineEdit("5000")
-            hbox.addWidget(self.maxSizeN)
-            hbox.addStretch(1)
-            vbox.addLayout(hbox)
-
-            hbox = QtWidgets.QHBoxLayout()
-            bKeepN = QtWidgets.QPushButton('Show only large regions')
-            bKeepN.setCheckable(True)
-            bKeepN.clicked.connect(self.Keep_n_Regions)
-            hbox.addWidget(bKeepN)
-            bRemoveN = QtWidgets.QPushButton('Remove small regions')
-            bRemoveN.setCheckable(True)
-            bRemoveN.clicked.connect(self.Remove_Small_Regions)
-            hbox.addWidget(bRemoveN)
-            hbox.addStretch(1)
-            vbox.addLayout(hbox)
-
-            bLoad2D = QtWidgets.QPushButton('Load slice')
-            bLoad2D.setCheckable(True)
-            bLoad2D.clicked.connect(self.Load2D)
-            hbox = QtWidgets.QHBoxLayout()
-            hbox.addWidget(bLoad2D)
-
-            hbox.addWidget(QtWidgets.QLabel("Slice:"))
-            self.scroll = QtWidgets.QScrollBar()
-            self.scroll.setOrientation(QtCore.Qt.Horizontal)
-            self.scroll.setRange(0, 100)
-            self.scroll.setMinimumWidth(150)
-            self.scroll.valueChanged.connect(self.set_image_slice_value)
-            hbox.addWidget(self.scroll)
-
-            self.image_slice = QtWidgets.QLineEdit("0")
-            self.image_slice.setMaximumWidth(30)
-            hbox.addWidget(self.image_slice)
-
-            hbox.addStretch(1)
-            vbox.addLayout(hbox)
+        hbox.addWidget(QtWidgets.QLabel("Output pixel size:"))
+        self.pixel_size = QtWidgets.QLineEdit("15")
+        self.pixel_size.setMaximumWidth(50)
+        hbox.addWidget(self.pixel_size)
+        hbox.addStretch(1)
+        vbox.addLayout(hbox)
 
 
-            hbox = QtWidgets.QHBoxLayout()
+        hbox = QtWidgets.QHBoxLayout()
+        self.cb_correct_brightness_optical_section = QtWidgets.QCheckBox('Normalize brightness optical sections')
+        self.cb_correct_brightness_optical_section.setChecked(True)
+        hbox.addWidget(self.cb_correct_brightness_optical_section)
+        hbox.addStretch(1)
+        vbox.addLayout(hbox)
+        
 
-            bSaveSlice = QtWidgets.QPushButton('Save slice')
-            bSaveSlice.setCheckable(True)
-            bSaveSlice.clicked.connect(self.SaveSlice)
-            hbox.addWidget(bSaveSlice)
+        hbox = QtWidgets.QHBoxLayout()
+        hbox.addWidget(QtWidgets.QLabel(
+            "Slices range:"))
+        self.start_slice = QtWidgets.QLineEdit("")
+        self.start_slice.setMaximumWidth(50)
+        hbox.addWidget(self.start_slice)
+        hbox.addWidget(QtWidgets.QLabel(
+            "to"))
+        self.end_slice = QtWidgets.QLineEdit("")
+        self.end_slice.setMaximumWidth(50)
+        hbox.addWidget(self.end_slice)
+        hbox.addStretch(1)
+        vbox.addLayout(hbox)
 
-            bSaveVolume = QtWidgets.QPushButton('Save volume')
-            bSaveVolume.setCheckable(True)
-            bSaveVolume.clicked.connect(self.SaveVolume)
-            hbox.addWidget(bSaveVolume)
+        # hbox = QtWidgets.QHBoxLayout()
+        # hbox.addWidget(QtWidgets.QLabel(
+        #     "Maximum number of optical slices:"))
+        # self.nr_optical_slices = QtWidgets.QLineEdit("1")
+        # self.nr_optical_slices.setMaximumWidth(50)
+        # hbox.addWidget(self.nr_optical_slices)
+        # hbox.addStretch(1)
+        # vbox.addLayout(hbox)
 
-            # bNormalize = QtWidgets.QPushButton('Normalize')
-            # bNormalize.setCheckable(True)
-            # bNormalize.clicked.connect(self.Normalize)
-            # hbox.addWidget(bNormalize)
+        hbox = QtWidgets.QHBoxLayout()
+        hbox.addWidget(QtWidgets.QLabel("Load channels:"))
+        self.cb_C1 = QtWidgets.QCheckBox('1')
+        self.cb_C1.setChecked(True)
+        hbox.addWidget(self.cb_C1)
+        self.cb_C2 = QtWidgets.QCheckBox('2')
+        self.cb_C2.setChecked(True)
+        hbox.addWidget(self.cb_C2)
+        self.cb_C3 = QtWidgets.QCheckBox('3')
+        self.cb_C3.setChecked(True)
+        hbox.addWidget(self.cb_C3)
+        self.cb_C4 = QtWidgets.QCheckBox('4')
+        self.cb_C4.setChecked(True)
+        hbox.addWidget(self.cb_C4)
+        hbox.addStretch(1)
+        vbox.addLayout(hbox)
 
-            # self.normalize_value = QtWidgets.QLineEdit("0")
-            # self.normalize_value.setMaximumWidth(30)
-            # hbox.addWidget(self.normalize_value)
+        hbox = QtWidgets.QHBoxLayout()
+        bLoad3D = QtWidgets.QPushButton('Load volume')
+        bLoad3D.setCheckable(True)
+        bLoad3D.clicked.connect(self.Load3D)
+        hbox.addWidget(bLoad3D)
+        # hbox.addStretch(1)
+        # vbox.addLayout(hbox)
 
-            #bSaveMovie = QtWidgets.QPushButton('Save movie')
-            #bSaveMovie.setCheckable(True)
-            #bSaveMovie.clicked.connect(self.SaveMovie)
-            #hbox.addWidget(bSaveMovie)
-            hbox.addStretch(1)
-            vbox.addLayout(hbox)
+        # hbox = QtWidgets.QHBoxLayout()
+        bLoad3D = QtWidgets.QPushButton('Reload in shape')
+        bLoad3D.setCheckable(True)
+        bLoad3D.clicked.connect(self.LoadInRegion)
+        hbox.addWidget(bLoad3D)
+        bCrop = QtWidgets.QPushButton('Crop to shape')
+        bCrop.setCheckable(True)
+        bCrop.clicked.connect(self.CropToRegion)
+        hbox.addWidget(bCrop)
+        hbox.addStretch(1)
+        vbox.addLayout(hbox)
 
-            #bStardist = QtWidgets.QPushButton('Run Stardist in shape')
-            #bStardist.setCheckable(True)
-            #bStardist.clicked.connect(self.run_stardist)
-            #hbox = QtWidgets.QHBoxLayout()
-            #hbox.addWidget(bStardist)
-            #hbox.addStretch(1)
-            #vbox.addLayout(hbox)
+        hbox = QtWidgets.QHBoxLayout()
+        hbox.addWidget(QtWidgets.QLabel("Tissue threshold value:"))
+        self.thresholdN = QtWidgets.QLineEdit("0.3")
+        hbox.addWidget(self.thresholdN)
+        hbox.addStretch(1)
+        vbox.addLayout(hbox)
 
-            #vbox.addStretch(1)
-            
-            bAddPolygon = QtWidgets.QPushButton('Add')
-            bAddPolygon.setCheckable(True)
-            bAddPolygon.clicked.connect(self.add_polygon)
-            bRemoveOutside = QtWidgets.QPushButton('Remove outside interpolated region')
-            bRemoveOutside.setCheckable(True)
-            bRemoveOutside.clicked.connect(self.run_remove_outside)
-            hbox = QtWidgets.QHBoxLayout()
-            hbox.addWidget(bAddPolygon)
-            hbox.addWidget(bRemoveOutside)
-            hbox.addStretch(1)
-            vbox.addLayout(hbox)
+        hbox = QtWidgets.QHBoxLayout()
+        hbox.addWidget(QtWidgets.QLabel("Number of regions to retain:"))
+        self.spinN = QtWidgets.QSpinBox()
+        self.spinN.setValue(1)
+        hbox.addWidget(self.spinN)
+        hbox.addStretch(1)
+        vbox.addLayout(hbox)
 
-            vbox.addStretch(1)
+        hbox = QtWidgets.QHBoxLayout()
+        hbox.addWidget(QtWidgets.QLabel("Minimal size:"))
+        self.maxSizeN = QtWidgets.QLineEdit("5000")
+        hbox.addWidget(self.maxSizeN)
+        hbox.addStretch(1)
+        vbox.addLayout(hbox)
+
+        hbox = QtWidgets.QHBoxLayout()
+        bKeepN = QtWidgets.QPushButton('Show only large regions')
+        bKeepN.setCheckable(True)
+        bKeepN.clicked.connect(self.Keep_n_Regions)
+        hbox.addWidget(bKeepN)
+        bRemoveN = QtWidgets.QPushButton('Remove small regions')
+        bRemoveN.setCheckable(True)
+        bRemoveN.clicked.connect(self.Remove_Small_Regions)
+        hbox.addWidget(bRemoveN)
+        hbox.addStretch(1)
+        vbox.addLayout(hbox)
+
+        bLoad2D = QtWidgets.QPushButton('Load slice')
+        bLoad2D.setCheckable(True)
+        bLoad2D.clicked.connect(self.Load2D)
+        hbox = QtWidgets.QHBoxLayout()
+        hbox.addWidget(bLoad2D)
+
+        hbox.addWidget(QtWidgets.QLabel("Slice:"))
+        self.scroll = QtWidgets.QScrollBar()
+        self.scroll.setOrientation(QtCore.Qt.Horizontal)
+        self.scroll.setRange(0, 100)
+        self.scroll.setMinimumWidth(150)
+        self.scroll.valueChanged.connect(self.set_image_slice_value)
+        hbox.addWidget(self.scroll)
+
+        self.image_slice = QtWidgets.QLineEdit("0")
+        self.image_slice.setMaximumWidth(30)
+        hbox.addWidget(self.image_slice)
+
+        hbox.addStretch(1)
+        vbox.addLayout(hbox)
+
+
+        hbox = QtWidgets.QHBoxLayout()
+
+        bSaveSlice = QtWidgets.QPushButton('Save slice')
+        bSaveSlice.setCheckable(True)
+        bSaveSlice.clicked.connect(self.SaveSlice)
+        hbox.addWidget(bSaveSlice)
+
+        bSaveVolume = QtWidgets.QPushButton('Save volume')
+        bSaveVolume.setCheckable(True)
+        bSaveVolume.clicked.connect(self.SaveVolume)
+        hbox.addWidget(bSaveVolume)
+
+        # bNormalize = QtWidgets.QPushButton('Normalize')
+        # bNormalize.setCheckable(True)
+        # bNormalize.clicked.connect(self.Normalize)
+        # hbox.addWidget(bNormalize)
+
+        # self.normalize_value = QtWidgets.QLineEdit("0")
+        # self.normalize_value.setMaximumWidth(30)
+        # hbox.addWidget(self.normalize_value)
+
+        #bSaveMovie = QtWidgets.QPushButton('Save movie')
+        #bSaveMovie.setCheckable(True)
+        #bSaveMovie.clicked.connect(self.SaveMovie)
+        #hbox.addWidget(bSaveMovie)
+        hbox.addStretch(1)
+        vbox.addLayout(hbox)
+
+        #bStardist = QtWidgets.QPushButton('Run Stardist in shape')
+        #bStardist.setCheckable(True)
+        #bStardist.clicked.connect(self.run_stardist)
+        #hbox = QtWidgets.QHBoxLayout()
+        #hbox.addWidget(bStardist)
+        #hbox.addStretch(1)
+        #vbox.addLayout(hbox)
+
+        #vbox.addStretch(1)
+        
+        bAddPolygon = QtWidgets.QPushButton('Add')
+        bAddPolygon.setCheckable(True)
+        bAddPolygon.clicked.connect(self.add_polygon)
+        bRemoveOutside = QtWidgets.QPushButton('Remove outside interpolated region')
+        bRemoveOutside.setCheckable(True)
+        bRemoveOutside.clicked.connect(self.run_remove_outside)
+        hbox = QtWidgets.QHBoxLayout()
+        hbox.addWidget(bAddPolygon)
+        hbox.addWidget(bRemoveOutside)
+        hbox.addStretch(1)
+        vbox.addLayout(hbox)
+
+        vbox.addStretch(1)
+
+
+        bAdd3DShape = QtWidgets.QPushButton('2D to 3D shape')
+        bAdd3DShape.setCheckable(True)
+        bAdd3DShape.clicked.connect(self.Make3DShape)
+        hbox = QtWidgets.QHBoxLayout()
+        hbox.addWidget(bAdd3DShape)
+        hbox.addStretch(1)
+        vbox.addLayout(hbox)
+
+        vbox.addStretch(1)
 
 
 
-            
-            widget.setLayout(vbox)
-            self.viewer.window.add_dock_widget(widget, area="right")
 
-            animation_widget = AnimationWidget(self.viewer)
-            self.viewer.window.add_dock_widget(animation_widget, area='right')
+        
+        widget.setLayout(vbox)
+        self.viewer.window.add_dock_widget(widget, area="right")
 
-            #@viewer.bind_key('z')
-            #def print_z_slice(viewer):
-            #    print(viewer.dims.point[0])
+        animation_widget = AnimationWidget(self.viewer)
+        self.viewer.window.add_dock_widget(animation_widget, area='right')
 
-            # inputfile = ''
-            # try:
-            #     opts, args = getopt.getopt(
-            #         argv, "hi:c:", ["ifile=", "channel="])
-            # except getopt.GetoptError:'
-            #     sys.exit(2)
-            # for opt, arg in opts:
-            #     if opt == '-h':
-            #         sys.exit()
-            #     elif opt in ("-i", "--ifile"):
-            #         inputfile = arg
-            #     elif opt in ("-c", "--channel"):
-            #         channel = channel
+        napari.run()
+        #@viewer.bind_key('z')
+        #def print_z_slice(viewer):
+        #    print(viewer.dims.point[0])
+
+        # inputfile = ''
+        # try:
+        #     opts, args = getopt.getopt(
+        #         argv, "hi:c:", ["ifile=", "channel="])
+        # except getopt.GetoptError:'
+        #     sys.exit(2)
+        # for opt, arg in opts:
+        #     if opt == '-h':
+        #         sys.exit()
+        #     elif opt in ("-i", "--ifile"):
+        #         inputfile = arg
+        #     elif opt in ("-c", "--channel"):
+        #         channel = channel
 
 
 # if __name__ == "__main__":

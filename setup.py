@@ -16,7 +16,7 @@ with open(os.path.join(HERE, "README.md")) as fid:
 # This call to setup() does all the work
 setup(
     name="napari-stpt",
-    version="0.0.8.24",
+    version="0.0.8.30",
     description="napari viewer which can read stpt images as zarr files",
     long_description=README,
     long_description_content_type="text/markdown",
@@ -31,16 +31,12 @@ setup(
     packages=["napari_stpt"],
     include_package_data=True,
     install_requires=[
+        'opencv-python==4.5.1.48'
         'napari',
         'numpy',
         'xarray',
-        'qtpy',
-        'pyqt5',
         'SimpleITK',
-        'opencv-python',
-        'zarr',
-        'stardist',
-        'tensorflow'
+        'qtpy',
         'napari-animation'
     ],
     entry_points={"console_scripts": ["napari-stpt=napari_stpt.__main__:main"]},
